@@ -37,13 +37,14 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         self.btn_save.clicked.connect(self.save_project2)
         top_button_row.addWidget(self.btn_save)
 
+        # --- Barra de ferramentas: espaçamento e margens corretos (não sobrescrever tools_row)
         tools_row = QtWidgets.QHBoxLayout()
+        tools_row.setSpacing(4)
+        tools_row.setContentsMargins(4, 2, 4, 2)
         layout.addLayout(tools_row)
 
         tools_row.addWidget(self._create_tool_button("🔍", "Pesquisar", self.open_search_dialog))
-        tools_row.addWidget(
-            self._create_tool_button("✥", "Mover textura / Ajustar UV", self.open_uv_dialog)
-        )
+        tools_row.addWidget(self._create_tool_button("✥", "Mover textura / Ajustar UV", self.open_uv_dialog))
         tools_row.addWidget(self._create_tool_button("📄", "Copiar", self.copy_element))
         tools_row.addWidget(self._create_tool_button("📋", "Colar", self.paste_element))
 
@@ -56,7 +57,9 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         self.tree1 = QtWidgets.QTreeWidget()
         self.tree1.setHeaderHidden(True)
         self.tree1.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
-        self.tree1.customContextMenuRequested.connect(lambda pos: self._show_context_menu(self.tree1, pos))
+        self.tree1.customContextMenuRequested.connect(
+            lambda pos: self._show_context_menu(self.tree1, pos)
+        )
         left_layout.addWidget(self.tree1)
         splitter.addWidget(left_panel)
 
@@ -66,7 +69,9 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         self.tree2 = QtWidgets.QTreeWidget()
         self.tree2.setHeaderHidden(True)
         self.tree2.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
-        self.tree2.customContextMenuRequested.connect(lambda pos: self._show_context_menu(self.tree2, pos))
+        self.tree2.customContextMenuRequested.connect(
+            lambda pos: self._show_context_menu(self.tree2, pos)
+        )
         right_layout.addWidget(self.tree2)
         splitter.addWidget(right_panel)
 
@@ -165,7 +170,9 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Aviso", "Digite algo para buscar")
             return
         tree = self.tree1 if scope == "JSON 1" else self.tree2
-        self.search_results = [item for item in self._walk_items(tree) if query in item.text(0).lower()]
+        self.search_results = [
+            item for item in self._walk_items(tree) if query in item.text(0).lower()
+        ]
         if not self.search_results:
             QtWidgets.QMessageBox.information(self, "Busca", "Nada encontrado")
             return
@@ -276,6 +283,17 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         button.setText(text)
         button.setToolTip(tooltip)
         button.setAutoRaise(True)
+
+        # --- Ícone (texto) maior + botão compacto
+        font = button.font()
+        font.setPointSize(14)
+        button.setFont(font)
+
+        button.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Fixed,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
+
         button.clicked.connect(slot)
         return button
 
