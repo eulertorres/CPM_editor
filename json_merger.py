@@ -261,7 +261,38 @@ class JSONMergerLogic:
         if not isinstance(children, list):
             children = []
             element["children"] = children
+        JSONMergerLogic._reorder_children_key(element)
         return children
+
+    @staticmethod
+    def _reorder_children_key(element: dict[str, Any]) -> None:
+        if "children" not in element or not isinstance(element, dict):
+            return
+        children_value = element.pop("children")
+        inserted = False
+        # Tenta após DisableVanillaAnim
+        if "DisableVanillaAnim" in element:
+            new_data: dict[str, Any] = {}
+            for key, value in element.items():
+                new_data[key] = value
+                if key == "DisableVanillaAnim":
+                    new_data["children"] = children_value
+                    inserted = True
+            element.clear()
+            element.update(new_data)
+        # Se não inseriu, tenta antes de pos
+        if not inserted and "pos" in element:
+            new_data = {}
+            for key, value in element.items():
+                if key == "pos":
+                    new_data["children"] = children_value
+                    inserted = True
+                new_data[key] = value
+            element.clear()
+            element.update(new_data)
+        # Caso nada se aplique, reinsere no final (comportamento anterior)
+        if not inserted:
+            element["children"] = children_value
 
     def _build_hierarchy(
         self,
