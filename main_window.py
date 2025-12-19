@@ -279,6 +279,33 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
             item.setForeground(0, QtGui.QBrush(QtGui.QColor("#5c5c5c")))
             parent.addChild(item)
 
+    def _insert_elements_only(
+        self,
+        tree: QtWidgets.QTreeWidget,
+        parent: QtWidgets.QTreeWidgetItem,
+        value: object,
+        path: List[int | str],
+    ) -> None:
+        if isinstance(value, dict):
+            for key in ("children", "elements"):
+                val = value.get(key)
+                if isinstance(val, list):
+                    for idx, element in enumerate(val):
+                        if not isinstance(element, dict):
+                            continue
+                        label = element.get("id") or element.get("name") or f"[{idx}]"
+                        item = QtWidgets.QTreeWidgetItem([label])
+                        item.setData(0, QtCore.Qt.ItemDataRole.UserRole, path + [key, idx])
+                        item.setForeground(0, QtGui.QBrush(QtGui.QColor("#1b7fb3")))
+                        font = item.font(0)
+                        font.setBold(True)
+                        item.setFont(0, font)
+                        parent.addChild(item)
+                        self._insert_elements_only(tree, item, element, path + [key, idx])
+        elif isinstance(value, list):
+            for idx, element in enumerate(value):
+                self._insert_elements_only(tree, parent, element, path + [idx])
+
     def _highlight(self, tree: QtWidgets.QTreeWidget, item: QtWidgets.QTreeWidgetItem) -> None:
         ancestor = item.parent()
         while ancestor:
@@ -554,34 +581,6 @@ class MovementDialog(QtWidgets.QDialog):
                 if text == target:
                     combo.setCurrentIndex(index)
                     break
-
-    def _insert_elements_only(
-        self,
-        tree: QtWidgets.QTreeWidget,
-        parent: QtWidgets.QTreeWidgetItem,
-        value: object,
-        path: List[int | str],
-    ) -> None:
-        if isinstance(value, dict):
-            for key in ("children", "elements"):
-                val = value.get(key)
-                if isinstance(val, list):
-                    for idx, element in enumerate(val):
-                        if not isinstance(element, dict):
-                            continue
-                        label = element.get("id") or element.get("name") or f"[{idx}]"
-                        item = QtWidgets.QTreeWidgetItem([label])
-                        item.setData(0, QtCore.Qt.ItemDataRole.UserRole, path + [key, idx])
-                        item.setForeground(0, QtGui.QBrush(QtGui.QColor("#1b7fb3")))
-                        font = item.font(0)
-                        font.setBold(True)
-                        item.setFont(0, font)
-                        parent.addChild(item)
-                        self._insert_elements_only(tree, item, element, path + [key, idx])
-        elif isinstance(value, list):
-            for idx, element in enumerate(value):
-                self._insert_elements_only(tree, parent, element, path + [idx])
-
 
 def run_app() -> None:
     app = QtWidgets.QApplication(sys.argv)

@@ -349,6 +349,7 @@ class JSONMergerLogic:
             return
         tex_scale_raw = element.get("texScale", 1)
         tex_scale: float = tex_scale_raw if isinstance(tex_scale_raw, (int, float)) else 1
+        base_uv = self._extract_uv(element)
         if "faceUV" in element and isinstance(element["faceUV"], dict):
             for face_name, coords in element["faceUV"].items():
                 if not isinstance(coords, dict):
@@ -360,8 +361,10 @@ class JSONMergerLogic:
                         coords[key] += 6
                 coords.setdefault("rot", "0")
                 coords.setdefault("autoUV", True)
+            if base_uv:
+                element.setdefault("u", base_uv[0])
+                element.setdefault("v", base_uv[1])
             return
-        base_uv = self._extract_uv(element)
         size = self._extract_size(element)
         if base_uv is None or size is None:
             return
@@ -381,9 +384,8 @@ class JSONMergerLogic:
             coords["rot"] = "0"
             coords["autoUV"] = True
         element["faceUV"] = face_uv
-        element.pop("uv", None)
-        element.pop("u", None)
-        element.pop("v", None)
+        element["u"] = u
+        element["v"] = v
 
     @staticmethod
     def _extract_uv(element: dict[str, Any]) -> tuple[float, float] | None:
