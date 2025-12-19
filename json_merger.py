@@ -280,11 +280,11 @@ class JSONMergerLogic:
                     inserted = True
             element.clear()
             element.update(new_data)
-        # Se não inseriu, tenta antes de pos
-        if not inserted and "pos" in element:
+        # Se não inseriu, tenta antes de v
+        if not inserted and "v" in element:
             new_data = {}
             for key, value in element.items():
-                if key == "pos":
+                if key == "v":
                     new_data["children"] = children_value
                     inserted = True
                 new_data[key] = value

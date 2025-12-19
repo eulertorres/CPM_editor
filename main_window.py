@@ -223,6 +223,13 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         self.search_index = 0
         self.last_search_scope = None
 
+    def _toggle_elements_only(self) -> None:
+        self.show_only_elements = self.elements_only_checkbox.isChecked()
+        if self.logic.json1:
+            self._build_tree(self.tree1, self.logic.json1)
+        if self.logic.json2:
+            self._build_tree(self.tree2, self.logic.json2)
+
     def _build_tree(self, tree: QtWidgets.QTreeWidget, data: object) -> None:
         tree.clear()
         root = QtWidgets.QTreeWidgetItem(["root"])
@@ -574,13 +581,6 @@ class MovementDialog(QtWidgets.QDialog):
         elif isinstance(value, list):
             for idx, element in enumerate(value):
                 self._insert_elements_only(tree, parent, element, path + [idx])
-
-    def _toggle_elements_only(self) -> None:
-        self.show_only_elements = self.elements_only_checkbox.isChecked()
-        if self.logic.json1:
-            self._build_tree(self.tree1, self.logic.json1)
-        if self.logic.json2:
-            self._build_tree(self.tree2, self.logic.json2)
 
 
 def run_app() -> None:
