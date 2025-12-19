@@ -12,6 +12,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         self.logic = JSONMergerLogic()
         self.search_results: list[QtWidgets.QTreeWidgetItem] = []
         self.search_index = 0
+        self.last_search_scope: str | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -21,62 +22,30 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         central = QtWidgets.QWidget()
         layout = QtWidgets.QVBoxLayout(central)
 
-        button_row = QtWidgets.QHBoxLayout()
-        layout.addLayout(button_row)
+        top_button_row = QtWidgets.QHBoxLayout()
+        layout.addLayout(top_button_row)
 
         self.btn_project1 = QtWidgets.QPushButton("Carregar Projeto 1")
         self.btn_project1.clicked.connect(self.load_project1)
-        button_row.addWidget(self.btn_project1)
+        top_button_row.addWidget(self.btn_project1)
 
         self.btn_project2 = QtWidgets.QPushButton("Carregar Projeto 2")
         self.btn_project2.clicked.connect(self.load_project2)
-        button_row.addWidget(self.btn_project2)
-
-        self.search_input = QtWidgets.QLineEdit()
-        self.search_input.setPlaceholderText("Buscar...")
-        button_row.addWidget(self.search_input)
-
-        self.search_scope = QtWidgets.QComboBox()
-        self.search_scope.addItems(["JSON 1", "JSON 2"])
-        button_row.addWidget(self.search_scope)
-
-        self.btn_search = QtWidgets.QPushButton("Buscar")
-        self.btn_search.clicked.connect(self.search)
-        button_row.addWidget(self.btn_search)
-
-        self.btn_next_search = QtWidgets.QPushButton("Próximo")
-        self.btn_next_search.clicked.connect(self.next_search)
-        button_row.addWidget(self.btn_next_search)
-
-        self.btn_copy = QtWidgets.QPushButton("Copiar")
-        self.btn_copy.clicked.connect(self.copy_element)
-        button_row.addWidget(self.btn_copy)
-
-        self.btn_move = QtWidgets.QPushButton("Mover")
-        self.btn_move.clicked.connect(self.move_element)
-        button_row.addWidget(self.btn_move)
-
-        self.btn_paste = QtWidgets.QPushButton("Colar")
-        self.btn_paste.clicked.connect(self.paste_element)
-        button_row.addWidget(self.btn_paste)
-
-        self.du_input = QtWidgets.QLineEdit("0")
-        self.du_input.setFixedWidth(60)
-        self.dv_input = QtWidgets.QLineEdit("0")
-        self.dv_input.setFixedWidth(60)
-
-        button_row.addWidget(QtWidgets.QLabel("dU:"))
-        button_row.addWidget(self.du_input)
-        button_row.addWidget(QtWidgets.QLabel("dV:"))
-        button_row.addWidget(self.dv_input)
-
-        self.btn_shift_uv = QtWidgets.QPushButton("Shift UV")
-        self.btn_shift_uv.clicked.connect(self.shift_uv)
-        button_row.addWidget(self.btn_shift_uv)
+        top_button_row.addWidget(self.btn_project2)
 
         self.btn_save = QtWidgets.QPushButton("Salvar Projeto 2")
         self.btn_save.clicked.connect(self.save_project2)
-        button_row.addWidget(self.btn_save)
+        top_button_row.addWidget(self.btn_save)
+
+        tools_row = QtWidgets.QHBoxLayout()
+        layout.addLayout(tools_row)
+
+        tools_row.addWidget(self._create_tool_button("🔍", "Pesquisar", self.open_search_dialog))
+        tools_row.addWidget(
+            self._create_tool_button("✥", "Mover textura / Ajustar UV", self.open_uv_dialog)
+        )
+        tools_row.addWidget(self._create_tool_button("📄", "Copiar", self.copy_element))
+        tools_row.addWidget(self._create_tool_button("📋", "Colar", self.paste_element))
 
         splitter = QtWidgets.QSplitter()
         layout.addWidget(splitter, 1)
@@ -86,6 +55,8 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         left_layout.addWidget(QtWidgets.QLabel("JSON 1"))
         self.tree1 = QtWidgets.QTreeWidget()
         self.tree1.setHeaderHidden(True)
+        self.tree1.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree1.customContextMenuRequested.connect(lambda pos: self._show_context_menu(self.tree1, pos))
         left_layout.addWidget(self.tree1)
         splitter.addWidget(left_panel)
 
@@ -94,6 +65,8 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         right_layout.addWidget(QtWidgets.QLabel("JSON 2"))
         self.tree2 = QtWidgets.QTreeWidget()
         self.tree2.setHeaderHidden(True)
+        self.tree2.setContextMenuPolicy(QtCore.Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree2.customContextMenuRequested.connect(lambda pos: self._show_context_menu(self.tree2, pos))
         right_layout.addWidget(self.tree2)
         splitter.addWidget(right_panel)
 
@@ -175,46 +148,43 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         except Exception as exc:  # noqa: BLE001
             QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao colar elemento:\n{exc}")
 
-    def shift_uv(self) -> None:
-        try:
-            du = int(self.du_input.text())
-            dv = int(self.dv_input.text())
-        except ValueError:
-            QtWidgets.QMessageBox.critical(self, "Erro", "dU e dV devem ser inteiros")
-            return
+    def shift_uv(self, du: int, dv: int) -> bool:
         selected = self.tree2.currentItem()
         if not selected:
             QtWidgets.QMessageBox.warning(self, "Aviso", "Selecione elemento em JSON 2 para ajustar UV")
-            return
+            return False
         element = self.logic.get_by_path(self.logic.json2, self._item_path(selected))
         self.logic.adjust_uv(element, du, dv)
         self._build_tree(self.tree2, self.logic.json2)
         QtWidgets.QMessageBox.information(self, "Sucesso", f"UV ajustado em dU={du}, dV={dv}")
+        return True
 
-    def search(self) -> None:
-        query = self.search_input.text().strip().lower()
+    def perform_search(self, query: str, scope: str) -> None:
+        query = query.strip().lower()
         if not query:
             QtWidgets.QMessageBox.warning(self, "Aviso", "Digite algo para buscar")
             return
-        tree = self.tree1 if self.search_scope.currentText() == "JSON 1" else self.tree2
+        tree = self.tree1 if scope == "JSON 1" else self.tree2
         self.search_results = [item for item in self._walk_items(tree) if query in item.text(0).lower()]
         if not self.search_results:
             QtWidgets.QMessageBox.information(self, "Busca", "Nada encontrado")
             return
         self.search_index = 0
+        self.last_search_scope = scope
         self._highlight(tree, self.search_results[0])
 
     def next_search(self) -> None:
         if not self.search_results:
             QtWidgets.QMessageBox.warning(self, "Aviso", "Nenhum resultado")
             return
-        tree = self.tree1 if self.search_scope.currentText() == "JSON 1" else self.tree2
+        tree = self.tree1 if self.last_search_scope == "JSON 1" else self.tree2
         self.search_index = (self.search_index + 1) % len(self.search_results)
         self._highlight(tree, self.search_results[self.search_index])
 
     def clear_search(self) -> None:
         self.search_results = []
         self.search_index = 0
+        self.last_search_scope = None
 
     def _build_tree(self, tree: QtWidgets.QTreeWidget, data: object) -> None:
         tree.clear()
@@ -285,6 +255,116 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
     def _item_path(item: QtWidgets.QTreeWidgetItem) -> List[int | str]:
         data = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
         return list(data) if data is not None else []
+
+    def _show_context_menu(self, tree: QtWidgets.QTreeWidget, pos: QtCore.QPoint) -> None:
+        menu = QtWidgets.QMenu(self)
+        global_pos = tree.viewport().mapToGlobal(pos)
+
+        if tree is self.tree1:
+            copy_action = menu.addAction("Copiar de JSON 1")
+            copy_action.triggered.connect(self.copy_element)
+        else:
+            move_action = menu.addAction("Mover de JSON 2")
+            move_action.triggered.connect(self.move_element)
+            paste_action = menu.addAction("Colar em JSON 2")
+            paste_action.triggered.connect(self.paste_element)
+
+        menu.exec(global_pos)
+
+    def _create_tool_button(self, text: str, tooltip: str, slot: object) -> QtWidgets.QToolButton:
+        button = QtWidgets.QToolButton()
+        button.setText(text)
+        button.setToolTip(tooltip)
+        button.setAutoRaise(True)
+        button.clicked.connect(slot)
+        return button
+
+    def open_search_dialog(self) -> None:
+        dialog = SearchDialog(self)
+        dialog.exec()
+
+    def open_uv_dialog(self) -> None:
+        dialog = UVShiftDialog(self)
+        dialog.exec()
+
+
+class SearchDialog(QtWidgets.QDialog):
+    def __init__(self, parent: JSONMergerWindow) -> None:
+        super().__init__(parent)
+        self.parent_window = parent
+        self.setWindowTitle("Buscar")
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QtWidgets.QVBoxLayout(self)
+
+        form = QtWidgets.QFormLayout()
+        self.query_input = QtWidgets.QLineEdit()
+        form.addRow("Termo", self.query_input)
+
+        self.scope_combo = QtWidgets.QComboBox()
+        self.scope_combo.addItems(["JSON 1", "JSON 2"])
+        form.addRow("Onde buscar", self.scope_combo)
+        layout.addLayout(form)
+
+        buttons = QtWidgets.QHBoxLayout()
+        btn_search = QtWidgets.QPushButton("Buscar")
+        btn_search.clicked.connect(self._run_search)
+        buttons.addWidget(btn_search)
+
+        self.btn_next = QtWidgets.QPushButton("Próximo")
+        self.btn_next.clicked.connect(self.parent_window.next_search)
+        buttons.addWidget(self.btn_next)
+
+        close_btn = QtWidgets.QPushButton("Fechar")
+        close_btn.clicked.connect(self.accept)
+        buttons.addWidget(close_btn)
+
+        layout.addLayout(buttons)
+
+    def _run_search(self) -> None:
+        self.parent_window.perform_search(self.query_input.text(), self.scope_combo.currentText())
+
+
+class UVShiftDialog(QtWidgets.QDialog):
+    def __init__(self, parent: JSONMergerWindow) -> None:
+        super().__init__(parent)
+        self.parent_window = parent
+        self.setWindowTitle("Mover textura (Shift UV)")
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QtWidgets.QVBoxLayout(self)
+
+        form = QtWidgets.QFormLayout()
+        self.du_input = QtWidgets.QSpinBox()
+        self.du_input.setRange(-9999, 9999)
+        self.du_input.setValue(0)
+        form.addRow("dU", self.du_input)
+
+        self.dv_input = QtWidgets.QSpinBox()
+        self.dv_input.setRange(-9999, 9999)
+        self.dv_input.setValue(0)
+        form.addRow("dV", self.dv_input)
+
+        layout.addLayout(form)
+
+        buttons = QtWidgets.QHBoxLayout()
+        btn_apply = QtWidgets.QPushButton("Aplicar")
+        btn_apply.clicked.connect(self._apply_shift)
+        buttons.addWidget(btn_apply)
+
+        close_btn = QtWidgets.QPushButton("Fechar")
+        close_btn.clicked.connect(self.accept)
+        buttons.addWidget(close_btn)
+
+        layout.addLayout(buttons)
+
+    def _apply_shift(self) -> None:
+        du = int(self.du_input.value())
+        dv = int(self.dv_input.value())
+        if self.parent_window.shift_uv(du, dv):
+            self.accept()
 
 
 def run_app() -> None:
