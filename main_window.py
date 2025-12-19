@@ -1,5 +1,5 @@
 import sys
-from typing import List
+from typing import Callable, List
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -342,7 +342,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
 
     def open_movement_dialog(self) -> None:
         if not self.logic.json2:
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Carregue o Projeto 2 para usar o +Movment")
+            QtWidgets.QMessageBox.warning(self, "Eita", "Carrega o Projeto 2 ai antes, por favorzinho :)")
             return
         dialog = MovementDialog(self, self.logic)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
@@ -439,7 +439,7 @@ class MovementDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         options = self.logic.list_elements()
         if not options:
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Nenhum elemento encontrado em JSON 2")
+            QtWidgets.QMessageBox.warning(self, "Xiii", "Nenhum elemento achado em JSON 2 :(")
             self.reject()
             return
 
@@ -462,6 +462,10 @@ class MovementDialog(QtWidgets.QDialog):
             form.addRow(label, combo)
             self.combos[key] = combo
         layout.addLayout(form)
+        self._prefill_defaults(labels)
+
+        self.debug_checkbox = QtWidgets.QCheckBox("DEBUG (salvar cada etapa)")
+        layout.addWidget(self.debug_checkbox)
 
         buttons = QtWidgets.QHBoxLayout()
         apply_btn = QtWidgets.QPushButton("Aplicar")
@@ -478,18 +482,61 @@ class MovementDialog(QtWidgets.QDialog):
         for key, combo in self.combos.items():
             data = combo.currentData()
             if data is None:
-                QtWidgets.QMessageBox.warning(self, "Aviso", f"Selecione um valor para {key}")
+                QtWidgets.QMessageBox.warning(self, "Ops", f"Escolhe algo para {key}, vai lá :)")
                 return
             selection[key] = list(data)
         if len({tuple(path) for path in selection.values()}) != len(selection):
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Cada seleção deve apontar para um elemento diferente.")
+            QtWidgets.QMessageBox.warning(
+                self, "Aviso", "Nao pode selecionar o mesmo elemento em duas opcoes nao :("
+            )
             return
         try:
-            self.logic.apply_movement_tool(selection)
-            QtWidgets.QMessageBox.information(self, "Sucesso", "Ferramenta +Movment aplicada.")
+            debug_hook = self._build_debug_hook() if self.debug_checkbox.isChecked() else None
+            self.logic.apply_movement_tool(selection, debug_hook=debug_hook)
+            QtWidgets.QMessageBox.information(self, "OBaaaaa", "Deu bom :)")
             self.accept()
         except Exception as exc:  # noqa: BLE001
-            QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao aplicar +Movment:\n{exc}")
+            QtWidgets.QMessageBox.critical(self, "AAAAAAAAAAAAAAAAAAAA", f"Deu esse erro aqui:\n{exc}")
+
+    def _build_debug_hook(self) -> Callable[[str], None]:
+        parent_window = self.parent()
+        step_labels = {
+            "clone": "Depois de clonar os Anti_",
+            "tamanho_posicao": "Depois de ajeitar tamanho/posicao",
+            "hierarquia": "Depois de reorganizar hierarquia",
+            "textura": "Depois de mexer na textura",
+        }
+
+        def _hook(step: str) -> None:
+            label = step_labels.get(step, step)
+            QtWidgets.QMessageBox.information(self, "DEBUG", f"{label}\nChama o Salvar como... ai!")
+            if isinstance(parent_window, JSONMergerWindow):
+                try:
+                    parent_window.save_project2_as()
+                except Exception as exc:  # noqa: BLE001
+                    QtWidgets.QMessageBox.warning(self, "DEBUG", f"Salvar como falhou:\n{exc}")
+
+        return _hook
+
+    def _prefill_defaults(self, labels: list[tuple[str, str]]) -> None:
+        name_targets = {
+            "left_arm": "Left Arm",
+            "right_arm": "Right Arm",
+            "left_leg": "Left Leg",
+            "right_leg": "Right Leg",
+            "left_sleeve": "Left Sleeve",
+            "right_sleeve": "Right Sleeve",
+            "left_pants": "Left Pants Leg",
+            "right_pants": "Right Pants Leg",
+        }
+        for key, _ in labels:
+            target = name_targets.get(key, "").lower()
+            combo = self.combos[key]
+            for index in range(combo.count()):
+                text = combo.itemText(index).lower()
+                if text == target:
+                    combo.setCurrentIndex(index)
+                    break
 
 
 def run_app() -> None:

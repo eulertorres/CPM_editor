@@ -1,7 +1,7 @@
 import copy
 import json
 import zipfile
-from typing import Any, List
+from typing import Any, Callable, List, Optional
 
 
 class JSONMergerLogic:
@@ -142,9 +142,13 @@ class JSONMergerLogic:
         walk(self.json2, [])
         return results
 
-    def apply_movement_tool(self, selection: dict[str, List[int | str]]) -> None:
+    def apply_movement_tool(
+        self,
+        selection: dict[str, List[int | str]],
+        debug_hook: Optional[Callable[[str], None]] = None,
+    ) -> None:
         if not self.project2_archive:
-            raise ValueError("Carregue o Projeto 2 antes de aplicar o +Movment")
+            raise ValueError("Naao tem que carregar o project 2 antes :d")
         required_keys = {
             "left_arm",
             "right_arm",
@@ -156,7 +160,7 @@ class JSONMergerLogic:
             "right_pants",
         }
         if set(selection) != required_keys:
-            raise ValueError("Seleção incompleta para +Movment")
+            raise ValueError("Faltou selecionar alguma coisa ai")
         refs = {key: self._element_ref(path) for key, path in selection.items()}
         anti_refs: dict[str, dict[str, Any]] = {}
         for key, ref in refs.items():
@@ -164,12 +168,14 @@ class JSONMergerLogic:
             self._prefix_element_name(clone, "Anti_")
             ref["parent_list"].append(clone)
             anti_refs[key] = {"obj": clone, "parent_list": ref["parent_list"]}
+        self._call_debug(debug_hook, "clone")
         for key in required_keys:
             self._set_y_size(refs[key]["obj"], 7)
         for anti in anti_refs.values():
             self._set_y_size(anti["obj"], 6)
         for key in ("left_arm", "right_arm", "left_leg", "right_leg"):
             self._set_y_position(anti_refs[key]["obj"], 6)
+        self._call_debug(debug_hook, "tamanho_posicao")
         self._build_hierarchy(
             parent_ref=refs["left_arm"],
             child_refs=[
@@ -202,6 +208,7 @@ class JSONMergerLogic:
             ],
             anti_child_ref=anti_refs["right_pants"],
         )
+        self._call_debug(debug_hook, "hierarquia")
         for key in (
             "left_arm",
             "right_arm",
@@ -213,6 +220,7 @@ class JSONMergerLogic:
             "right_pants",
         ):
             self._apply_per_face_uv(anti_refs[key]["obj"])
+        self._call_debug(debug_hook, "textura")
 
     def _read_config_from_archive(self, path: str) -> str:
         with zipfile.ZipFile(path, "r") as archive:
@@ -371,3 +379,12 @@ class JSONMergerLogic:
             if isinstance(x, (int, float)) and isinstance(y, (int, float)) and isinstance(z, (int, float)):
                 return float(x), float(y), float(z)
         return None
+
+    @staticmethod
+    def _call_debug(debug_hook: Optional[Callable[[str], None]], step: str) -> None:
+        if debug_hook is None:
+            return
+        try:
+            debug_hook(step)
+        except Exception:
+            pass
