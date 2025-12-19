@@ -1,7 +1,7 @@
 import sys
 from typing import List
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from json_merger import JSONMergerLogic
 
@@ -37,6 +37,10 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         self.btn_save.clicked.connect(self.save_project2)
         top_button_row.addWidget(self.btn_save)
 
+        self.btn_save_as = QtWidgets.QPushButton("Salvar como...")
+        self.btn_save_as.clicked.connect(self.save_project2_as)
+        top_button_row.addWidget(self.btn_save_as)
+
         # --- Barra de ferramentas: espaçamento e margens corretos (não sobrescrever tools_row)
         tools_row = QtWidgets.QHBoxLayout()
         tools_row.setSpacing(4)
@@ -47,6 +51,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         tools_row.addWidget(self._create_tool_button("✥", "Mover textura / Ajustar UV", self.open_uv_dialog))
         tools_row.addWidget(self._create_tool_button("📄", "Copiar", self.copy_element))
         tools_row.addWidget(self._create_tool_button("📋", "Colar", self.paste_element))
+        tools_row.addWidget(self._create_tool_button("+Movment", "Gerar hierarquia +Movment", self.open_movement_dialog))
 
         splitter = QtWidgets.QSplitter()
         layout.addWidget(splitter, 1)
@@ -112,6 +117,26 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         try:
             self.logic.save_project2()
             QtWidgets.QMessageBox.information(self, "Sucesso", "Projeto 2 atualizado com sucesso!")
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao salvar Projeto 2:\n{exc}")
+
+    def save_project2_as(self) -> None:
+        default_dir = None
+        if self.logic.project2_path:
+            default_dir = str(QtCore.QFileInfo(self.logic.project2_path).absolutePath())
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Salvar Projeto 2 como",
+            directory=default_dir,
+            filter="CPM Project (*.cpmproject)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".cpmproject"):
+            path = f"{path}.cpmproject"
+        try:
+            self.logic.save_project2_as(path)
+            QtWidgets.QMessageBox.information(self, "Sucesso", "Projeto 2 salvo no novo local!")
         except Exception as exc:  # noqa: BLE001
             QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao salvar Projeto 2:\n{exc}")
 
@@ -197,6 +222,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         tree.clear()
         root = QtWidgets.QTreeWidgetItem(["root"])
         root.setData(0, QtCore.Qt.ItemDataRole.UserRole, [])
+        root.setForeground(0, QtGui.QBrush(QtGui.QColor("#5c5c5c")))
         tree.addTopLevelItem(root)
         self._insert_items(tree, root, data, [])
         tree.expandItem(root)
@@ -212,6 +238,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
             for key, val in value.items():
                 item = QtWidgets.QTreeWidgetItem([str(key)])
                 item.setData(0, QtCore.Qt.ItemDataRole.UserRole, path + [key])
+                item.setForeground(0, QtGui.QBrush(QtGui.QColor("#7a7a7a")))
                 parent.addChild(item)
                 self._insert_items(tree, item, val, path + [key])
         elif isinstance(value, list):
@@ -222,11 +249,19 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
                     label = f"[{idx}]"
                 item = QtWidgets.QTreeWidgetItem([label])
                 item.setData(0, QtCore.Qt.ItemDataRole.UserRole, path + [idx])
+                if isinstance(element, dict):
+                    item.setForeground(0, QtGui.QBrush(QtGui.QColor("#1b7fb3")))
+                    font = item.font(0)
+                    font.setBold(True)
+                    item.setFont(0, font)
+                else:
+                    item.setForeground(0, QtGui.QBrush(QtGui.QColor("#5c5c5c")))
                 parent.addChild(item)
                 self._insert_items(tree, item, element, path + [idx])
         else:
             item = QtWidgets.QTreeWidgetItem([repr(value)])
             item.setData(0, QtCore.Qt.ItemDataRole.UserRole, path)
+            item.setForeground(0, QtGui.QBrush(QtGui.QColor("#5c5c5c")))
             parent.addChild(item)
 
     def _highlight(self, tree: QtWidgets.QTreeWidget, item: QtWidgets.QTreeWidgetItem) -> None:
@@ -304,6 +339,14 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
     def open_uv_dialog(self) -> None:
         dialog = UVShiftDialog(self)
         dialog.exec()
+
+    def open_movement_dialog(self) -> None:
+        if not self.logic.json2:
+            QtWidgets.QMessageBox.warning(self, "Aviso", "Carregue o Projeto 2 para usar o +Movment")
+            return
+        dialog = MovementDialog(self, self.logic)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self._build_tree(self.tree2, self.logic.json2)
 
 
 class SearchDialog(QtWidgets.QDialog):
@@ -383,6 +426,70 @@ class UVShiftDialog(QtWidgets.QDialog):
         dv = int(self.dv_input.value())
         if self.parent_window.shift_uv(du, dv):
             self.accept()
+
+
+class MovementDialog(QtWidgets.QDialog):
+    def __init__(self, parent: JSONMergerWindow, logic: JSONMergerLogic) -> None:
+        super().__init__(parent)
+        self.logic = logic
+        self.setWindowTitle("+Movment")
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QtWidgets.QVBoxLayout(self)
+        options = self.logic.list_elements()
+        if not options:
+            QtWidgets.QMessageBox.warning(self, "Aviso", "Nenhum elemento encontrado em JSON 2")
+            self.reject()
+            return
+
+        form = QtWidgets.QFormLayout()
+        self.combos: dict[str, QtWidgets.QComboBox] = {}
+        labels = [
+            ("left_arm", "Braço esquerdo"),
+            ("right_arm", "Braço direito"),
+            ("left_leg", "Perna esquerda"),
+            ("right_leg", "Perna direita"),
+            ("left_sleeve", "Manga esquerda"),
+            ("right_sleeve", "Manga direita"),
+            ("left_pants", "Calça esquerda"),
+            ("right_pants", "Calça direita"),
+        ]
+        for key, label in labels:
+            combo = QtWidgets.QComboBox()
+            for name, path in options:
+                combo.addItem(name, userData=path)
+            form.addRow(label, combo)
+            self.combos[key] = combo
+        layout.addLayout(form)
+
+        buttons = QtWidgets.QHBoxLayout()
+        apply_btn = QtWidgets.QPushButton("Aplicar")
+        apply_btn.clicked.connect(self._run_tool)
+        buttons.addWidget(apply_btn)
+
+        cancel_btn = QtWidgets.QPushButton("Cancelar")
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(cancel_btn)
+        layout.addLayout(buttons)
+
+    def _run_tool(self) -> None:
+        selection: dict[str, List[int | str]] = {}
+        for key, combo in self.combos.items():
+            data = combo.currentData()
+            if data is None:
+                QtWidgets.QMessageBox.warning(self, "Aviso", f"Selecione um valor para {key}")
+                return
+            selection[key] = list(data)
+        if len({tuple(path) for path in selection.values()}) != len(selection):
+            QtWidgets.QMessageBox.warning(self, "Aviso", "Cada seleção deve apontar para um elemento diferente.")
+            return
+        try:
+            self.logic.apply_movement_tool(selection)
+            QtWidgets.QMessageBox.information(self, "Sucesso", "Ferramenta +Movment aplicada.")
+            self.accept()
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao aplicar +Movment:\n{exc}")
 
 
 def run_app() -> None:
