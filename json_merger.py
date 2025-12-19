@@ -358,6 +358,8 @@ class JSONMergerLogic:
                 for key in ("sy", "ey"):
                     if key in coords and isinstance(coords[key], (int, float)):
                         coords[key] += 6
+                coords.setdefault("rot", "0")
+                coords.setdefault("autoUV", True)
             return
         base_uv = self._extract_uv(element)
         size = self._extract_size(element)
@@ -368,18 +370,16 @@ class JSONMergerLogic:
         u *= tex_scale
         v *= tex_scale
         face_uv = {
-            "north": {"sx": u + z, "sy": v + z, "ex": u + z + x, "ey": v + z + y},
             "east": {"sx": u, "sy": v + z, "ex": u + z, "ey": v + z + y},
             "south": {"sx": u + z + x, "sy": v + z, "ex": u + z + x + x, "ey": v + z + y},
+            "north": {"sx": u + z, "sy": v + z, "ex": u + z + x, "ey": v + z + y},
             "west": {"sx": u + z + x + x, "sy": v + z, "ex": u + z + x + x + z, "ey": v + z + y},
-            "up": {"sx": u + z, "sy": v, "ex": u + z + x, "ey": v + z},
-            "down": {"sx": u + x + z, "sy": v, "ex": u + x + z + x, "ey": v + z},
         }
-        for name, coords in face_uv.items():
-            if name in {"up", "down"}:
-                continue
+        for coords in face_uv.values():
             coords["sy"] += 6
             coords["ey"] += 6
+            coords["rot"] = "0"
+            coords["autoUV"] = True
         element["faceUV"] = face_uv
         element.pop("uv", None)
         element.pop("u", None)

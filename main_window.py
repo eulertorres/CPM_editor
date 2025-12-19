@@ -13,6 +13,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         self.search_results: list[QtWidgets.QTreeWidgetItem] = []
         self.search_index = 0
         self.last_search_scope: str | None = None
+        self.show_only_elements = False
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -52,6 +53,10 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         tools_row.addWidget(self._create_tool_button("📄", "Copiar", self.copy_element))
         tools_row.addWidget(self._create_tool_button("📋", "Colar", self.paste_element))
         tools_row.addWidget(self._create_tool_button("+Movment", "Gerar hierarquia +Movment", self.open_movement_dialog))
+
+        self.elements_only_checkbox = QtWidgets.QCheckBox("apenas Elementos")
+        self.elements_only_checkbox.stateChanged.connect(self._toggle_elements_only)
+        layout.addWidget(self.elements_only_checkbox)
 
         splitter = QtWidgets.QSplitter()
         layout.addWidget(splitter, 1)
@@ -224,7 +229,10 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         root.setData(0, QtCore.Qt.ItemDataRole.UserRole, [])
         root.setForeground(0, QtGui.QBrush(QtGui.QColor("#5c5c5c")))
         tree.addTopLevelItem(root)
-        self._insert_items(tree, root, data, [])
+        if self.show_only_elements:
+            self._insert_elements_only(tree, root, data, [])
+        else:
+            self._insert_items(tree, root, data, [])
         tree.expandItem(root)
 
     def _insert_items(
@@ -347,6 +355,8 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         dialog = MovementDialog(self, self.logic)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self._build_tree(self.tree2, self.logic.json2)
+            if self.elements_only_checkbox.isChecked():
+                self._toggle_elements_only()
 
 
 class SearchDialog(QtWidgets.QDialog):
@@ -537,6 +547,40 @@ class MovementDialog(QtWidgets.QDialog):
                 if text == target:
                     combo.setCurrentIndex(index)
                     break
+
+    def _insert_elements_only(
+        self,
+        tree: QtWidgets.QTreeWidget,
+        parent: QtWidgets.QTreeWidgetItem,
+        value: object,
+        path: List[int | str],
+    ) -> None:
+        if isinstance(value, dict):
+            for key in ("children", "elements"):
+                val = value.get(key)
+                if isinstance(val, list):
+                    for idx, element in enumerate(val):
+                        if not isinstance(element, dict):
+                            continue
+                        label = element.get("id") or element.get("name") or f"[{idx}]"
+                        item = QtWidgets.QTreeWidgetItem([label])
+                        item.setData(0, QtCore.Qt.ItemDataRole.UserRole, path + [key, idx])
+                        item.setForeground(0, QtGui.QBrush(QtGui.QColor("#1b7fb3")))
+                        font = item.font(0)
+                        font.setBold(True)
+                        item.setFont(0, font)
+                        parent.addChild(item)
+                        self._insert_elements_only(tree, item, element, path + [key, idx])
+        elif isinstance(value, list):
+            for idx, element in enumerate(value):
+                self._insert_elements_only(tree, parent, element, path + [idx])
+
+    def _toggle_elements_only(self) -> None:
+        self.show_only_elements = self.elements_only_checkbox.isChecked()
+        if self.logic.json1:
+            self._build_tree(self.tree1, self.logic.json1)
+        if self.logic.json2:
+            self._build_tree(self.tree2, self.logic.json2)
 
 
 def run_app() -> None:
