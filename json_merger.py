@@ -146,6 +146,7 @@ class JSONMergerLogic:
         self,
         selection: dict[str, List[int | str]],
         debug_hook: Optional[Callable[[str], None]] = None,
+        skin_x128: bool = False,
     ) -> None:
         if not self.project2_archive:
             raise ValueError("Naao tem que carregar o project 2 antes :d")
@@ -219,7 +220,7 @@ class JSONMergerLogic:
             "left_pants",
             "right_pants",
         ):
-            self._apply_per_face_uv(anti_refs[key]["obj"])
+            self._apply_per_face_uv(anti_refs[key]["obj"], skin_x128)
         self._call_debug(debug_hook, "textura")
 
     def _read_config_from_archive(self, path: str) -> str:
@@ -344,7 +345,7 @@ class JSONMergerLogic:
                     if axis_key in pos:
                         pos[axis_key] = value
 
-    def _apply_per_face_uv(self, element: Any) -> None:
+    def _apply_per_face_uv(self, element: Any, skin_x128: bool = False) -> None:
         if not isinstance(element, dict):
             return
         tex_scale_raw = element.get("texScale", 1)
@@ -356,9 +357,11 @@ class JSONMergerLogic:
                     continue
                 if face_name.lower() in {"up", "down"}:
                     continue
-                for key in ("sy", "ey"):
+                for key in ("sx", "ex", "sy", "ey"):
                     if key in coords and isinstance(coords[key], (int, float)):
-                        coords[key] += 6
+                        coords[key] = coords[key] * (2 if skin_x128 else 1)
+                        if key in ("sy", "ey"):
+                            coords[key] += 6 * (2 if skin_x128 else 1)
                 coords.setdefault("rot", "0")
                 coords.setdefault("autoUV", True)
             if base_uv:
@@ -372,6 +375,12 @@ class JSONMergerLogic:
         x, y, z = (component * tex_scale for component in size)
         u *= tex_scale
         v *= tex_scale
+        scale = 2 if skin_x128 else 1
+        x *= scale
+        y *= scale
+        z *= scale
+        u *= scale
+        v *= scale
         face_uv = {
             "east": {"sx": u, "sy": v + z, "ex": u + z, "ey": v + z + y},
             "south": {"sx": u + z + x, "sy": v + z, "ex": u + z + x + x, "ey": v + z + y},
@@ -379,8 +388,8 @@ class JSONMergerLogic:
             "west": {"sx": u + z + x + x, "sy": v + z, "ex": u + z + x + x + z, "ey": v + z + y},
         }
         for coords in face_uv.values():
-            coords["sy"] += 6
-            coords["ey"] += 6
+            coords["sy"] += 6 * scale
+            coords["ey"] += 6 * scale
             coords["rot"] = "0"
             coords["autoUV"] = True
         element["faceUV"] = face_uv

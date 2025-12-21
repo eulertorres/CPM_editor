@@ -511,6 +511,9 @@ class MovementDialog(QtWidgets.QDialog):
         self.debug_checkbox = QtWidgets.QCheckBox("DEBUG (salvar cada etapa)")
         layout.addWidget(self.debug_checkbox)
 
+        self.skin_checkbox = QtWidgets.QCheckBox("skin x128")
+        layout.addWidget(self.skin_checkbox)
+
         buttons = QtWidgets.QHBoxLayout()
         apply_btn = QtWidgets.QPushButton("Aplicar")
         apply_btn.clicked.connect(self._run_tool)
@@ -536,7 +539,8 @@ class MovementDialog(QtWidgets.QDialog):
             return
         try:
             debug_hook = self._build_debug_hook() if self.debug_checkbox.isChecked() else None
-            self.logic.apply_movement_tool(selection, debug_hook=debug_hook)
+            skin_x128 = self.skin_checkbox.isChecked()
+            self.logic.apply_movement_tool(selection, debug_hook=debug_hook, skin_x128=skin_x128)
             QtWidgets.QMessageBox.information(self, "OBaaaaa", "Deu bom :)")
             self.accept()
         except Exception as exc:  # noqa: BLE001
