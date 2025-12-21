@@ -355,7 +355,7 @@ class JSONMergerLogic:
             for face_name, coords in element["faceUV"].items():
                 if not isinstance(coords, dict):
                     continue
-                if face_name.lower() in {"up", "down"}:
+                if face_name.lower() in {"up"}:
                     continue
                 for key in ("sx", "ex", "sy", "ey"):
                     if key in coords and isinstance(coords[key], (int, float)):
@@ -364,6 +364,11 @@ class JSONMergerLogic:
                             coords[key] += 6 * (2 if skin_x128 else 1)
                 coords.setdefault("rot", "0")
                 coords.setdefault("autoUV", True)
+            if "down" in element["faceUV"]:
+                coords = element["faceUV"]["down"]
+                if isinstance(coords, dict):
+                    coords.setdefault("rot", "0")
+                    coords.setdefault("autoUV", True)
             if base_uv:
                 element.setdefault("u", base_uv[0])
                 element.setdefault("v", base_uv[1])
@@ -386,12 +391,19 @@ class JSONMergerLogic:
             "south": {"sx": u + z + x, "sy": v + z, "ex": u + z + x + x, "ey": v + z + y},
             "north": {"sx": u + z, "sy": v + z, "ex": u + z + x, "ey": v + z + y},
             "west": {"sx": u + z + x + x, "sy": v + z, "ex": u + z + x + x + z, "ey": v + z + y},
+            "down": {"sx": u + x + z, "sy": v, "ex": u + x + z + x, "ey": v + z},
         }
         for coords in face_uv.values():
             coords["sy"] += 6 * scale
             coords["ey"] += 6 * scale
             coords["rot"] = "0"
             coords["autoUV"] = True
+        # Remove face down para mangas (sleeves) e calças (pants) originais
+        name_val = element.get("name") or element.get("id") or ""
+        if isinstance(name_val, str):
+            lowered = name_val.lower()
+            if ("sleeve" in lowered or "pants" in lowered) and "down" in face_uv:
+                face_uv.pop("down", None)
         element["faceUV"] = face_uv
         element["u"] = u
         element["v"] = v
