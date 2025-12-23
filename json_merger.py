@@ -352,6 +352,59 @@ class JSONMergerLogic:
         raw = self._decode_bytes(archive[path])
         return json.loads(raw)
 
+    def interpolate_frames(
+        self, project: int, path: str, start_idx: int, end_idx: int, insert_count: int, new_name: str | None
+    ) -> None:
+        if insert_count <= 0:
+            raise ValueError("Quantidade de frames deve ser positiva")
+        anim = self.load_animation(project, path)
+        frames = anim.get("frames")
+        if not isinstance(frames, list):
+            raise ValueError("Animação sem frames")
+        if start_idx < 0 or end_idx >= len(frames) or start_idx >= end_idx:
+            raise ValueError("Intervalo de frames inválido")
+
+        start_frame = frames[start_idx]
+        end_frame = frames[end_idx]
+        start_map = self._components_by_storeid(start_frame)
+        end_map = self._components_by_storeid(end_frame)
+        union_ids = set(start_map) | set(end_map)
+
+        new_frames: list[dict[str, Any]] = []
+        for step in range(1, insert_count + 1):
+            t = step / (insert_count + 1)
+            comps: list[dict[str, Any]] = []
+            for sid in union_ids:
+                src = start_map.get(sid) or end_map.get(sid)
+                dst = end_map.get(sid) or start_map.get(sid)
+                if not isinstance(src, dict) or not isinstance(dst, dict):
+                    continue
+                comp = copy.deepcopy(src)
+                if "pos" in src and "pos" in dst:
+                    comp["pos"] = self._lerp_vectors(src.get("pos"), dst.get("pos"), t)
+                if "rotation" in src and "rotation" in dst:
+                    comp["rotation"] = self._lerp_vectors(src.get("rotation"), dst.get("rotation"), t)
+                comps.append(comp)
+            new_frames.append({"components": comps})
+
+        frames_with_interp: list[dict[str, Any]] = []
+        for idx, frame in enumerate(frames):
+            frames_with_interp.append(frame)
+            if idx == start_idx:
+                frames_with_interp.extend(new_frames)
+
+        anim["frames"] = frames_with_interp
+
+        target_archive = self.project1_archive if project == 1 else self.project2_archive
+        target_path = path
+        if new_name:
+            filename = new_name if new_name.lower().endswith(".json") else f"{new_name}.json"
+            if not filename.startswith("animations/"):
+                filename = f"animations/{filename}"
+            target_path = filename
+            anim["name"] = filename.split("/")[-1].replace(".json", "")
+        target_archive[target_path] = json.dumps(anim, indent=2, ensure_ascii=False).encode("utf-8")
+
     def apply_frame_to_model(self, project: int, path: str, frame_index: int) -> None:
         if not self.project2_archive:
             raise ValueError("Carregue o Projeto 2 antes")
@@ -706,6 +759,19 @@ class JSONMergerLogic:
         return result
 
     @staticmethod
+    def _components_by_storeid(frame: Any) -> dict[int, dict[str, Any]]:
+        result: dict[int, dict[str, Any]] = {}
+        comps = frame.get("components") if isinstance(frame, dict) else None
+        if not isinstance(comps, list):
+            return result
+        for comp in comps:
+            if isinstance(comp, dict):
+                sid = comp.get("storeID")
+                if isinstance(sid, int):
+                    result[sid] = comp
+        return result
+
+    @staticmethod
     def _apply_transform_to_node(node: dict[str, Any], comp: dict[str, Any]) -> None:
         if not isinstance(node, dict):
             return
@@ -759,6 +825,27 @@ class JSONMergerLogic:
             "z": base_dict.get("z", 0.0) - delta_dict.get("z", 0.0),
         }
         return result
+
+    @staticmethod
+    def _lerp_vectors(start: Any, end: Any, t: float) -> dict[str, float]:
+        def _as_dict(vec: Any) -> dict[str, float]:
+            if isinstance(vec, dict):
+                return {
+                    key.lower(): float(val)
+                    for key, val in vec.items()
+                    if key.lower() in {"x", "y", "z"} and isinstance(val, (int, float))
+                }
+            if isinstance(vec, list) and len(vec) >= 3:
+                return {"x": float(vec[0]), "y": float(vec[1]), "z": float(vec[2])}
+            return {"x": 0.0, "y": 0.0, "z": 0.0}
+
+        s = _as_dict(start)
+        e = _as_dict(end)
+        return {
+            "x": s.get("x", 0.0) + (e.get("x", 0.0) - s.get("x", 0.0)) * t,
+            "y": s.get("y", 0.0) + (e.get("y", 0.0) - s.get("y", 0.0)) * t,
+            "z": s.get("z", 0.0) + (e.get("z", 0.0) - s.get("z", 0.0)) * t,
+        }
 
     @staticmethod
     def _extract_uv(element: dict[str, Any]) -> tuple[float, float] | None:

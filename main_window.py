@@ -25,6 +25,37 @@ class StatusMixin:
             QtWidgets.QMessageBox.information(self, "Info", message)
 
 
+class OptionsDialog(QtWidgets.QDialog):
+    def __init__(self, parent: QtWidgets.QWidget, elements_only: bool, dark_mode: bool) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Opções")
+        self.elements_only = elements_only
+        self.dark_mode = dark_mode
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QtWidgets.QVBoxLayout(self)
+        self.chk_elements = QtWidgets.QCheckBox("Mostrar apenas elementos")
+        self.chk_elements.setChecked(self.elements_only)
+        layout.addWidget(self.chk_elements)
+
+        self.chk_dark = QtWidgets.QCheckBox("Modo escuro")
+        self.chk_dark.setChecked(self.dark_mode)
+        layout.addWidget(self.chk_dark)
+
+        buttons = QtWidgets.QHBoxLayout()
+        ok_btn = QtWidgets.QPushButton("OK")
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QtWidgets.QPushButton("Cancelar")
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(ok_btn)
+        buttons.addWidget(cancel_btn)
+        layout.addLayout(buttons)
+
+    def values(self) -> dict[str, bool]:
+        return {"elements_only": self.chk_elements.isChecked(), "dark_mode": self.chk_dark.isChecked()}
+
+
 class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
     def __init__(self) -> None:
         super().__init__()
@@ -33,6 +64,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.search_index = 0
         self.last_search_scope: str | None = None
         self.show_only_elements = True
+        self.dark_mode_enabled = False
         self._setup_ui()
         self.statusBar().showMessage("Pronto")
 
@@ -63,11 +95,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         top_button_row.addWidget(self.btn_save_as)
 
         self.btn_options = QtWidgets.QPushButton("Opções")
-        self.options_menu = QtWidgets.QMenu(self)
-        self.dark_mode_action = self.options_menu.addAction("Modo escuro")
-        self.dark_mode_action.setCheckable(True)
-        self.dark_mode_action.toggled.connect(self._toggle_dark_mode)
-        self.btn_options.setMenu(self.options_menu)
+        self.btn_options.clicked.connect(self.open_options_dialog)
         top_button_row.addWidget(self.btn_options)
 
         self.tabs = QtWidgets.QTabWidget()
@@ -91,11 +119,6 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         tools_row.addWidget(
             self._create_tool_button("🔤", "Prefixo/Sufixo em nomes", self.open_affix_dialog)
         )
-
-        self.elements_only_checkbox = QtWidgets.QCheckBox("apenas Elementos")
-        self.elements_only_checkbox.setChecked(True)
-        self.elements_only_checkbox.stateChanged.connect(self._toggle_elements_only)
-        models_layout.addWidget(self.elements_only_checkbox)
 
         splitter = QtWidgets.QSplitter()
         models_layout.addWidget(splitter, 1)
@@ -145,6 +168,10 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.btn_apply_frame = QtWidgets.QPushButton("Aplicar frame ao modelo")
         self.btn_apply_frame.clicked.connect(self.apply_frame_to_model)
         anim_buttons.addWidget(self.btn_apply_frame)
+
+        self.btn_interp_frames = QtWidgets.QPushButton("Interpolar frames")
+        self.btn_interp_frames.clicked.connect(self.interpolate_animation_frames)
+        anim_buttons.addWidget(self.btn_interp_frames)
 
         anim_layout.addLayout(anim_buttons)
 
@@ -305,34 +332,58 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.search_index = 0
         self.last_search_scope = None
 
-    def _toggle_elements_only(self) -> None:
-        self.show_only_elements = self.elements_only_checkbox.isChecked()
+    def _toggle_elements_only(self, state: bool) -> None:
+        self.show_only_elements = state
         if self.logic.json1:
             self._build_tree(self.tree1, self.logic.json1)
         if self.logic.json2:
             self._build_tree(self.tree2, self.logic.json2)
 
     def _toggle_dark_mode(self, enabled: bool) -> None:
+        self.dark_mode_enabled = enabled
         app = QtWidgets.QApplication.instance()
         if not app:
             return
         if enabled:
             palette = QtGui.QPalette()
-            palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor(53, 53, 53))
-            palette.setColor(QtGui.QPalette.ColorRole.WindowText, QtGui.QColor(220, 220, 220))
-            palette.setColor(QtGui.QPalette.ColorRole.Base, QtGui.QColor(35, 35, 35))
-            palette.setColor(QtGui.QPalette.ColorRole.AlternateBase, QtGui.QColor(53, 53, 53))
-            palette.setColor(QtGui.QPalette.ColorRole.ToolTipBase, QtGui.QColor(220, 220, 220))
-            palette.setColor(QtGui.QPalette.ColorRole.ToolTipText, QtGui.QColor(220, 220, 220))
-            palette.setColor(QtGui.QPalette.ColorRole.Text, QtGui.QColor(220, 220, 220))
-            palette.setColor(QtGui.QPalette.ColorRole.Button, QtGui.QColor(53, 53, 53))
-            palette.setColor(QtGui.QPalette.ColorRole.ButtonText, QtGui.QColor(220, 220, 220))
-            palette.setColor(QtGui.QPalette.ColorRole.BrightText, QtGui.QColor(255, 0, 0))
-            palette.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor(142, 45, 197).lighter())
-            palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor(0, 0, 0))
+            palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor(40, 40, 40))
+            palette.setColor(QtGui.QPalette.ColorRole.WindowText, QtGui.QColor(235, 235, 235))
+            palette.setColor(QtGui.QPalette.ColorRole.Base, QtGui.QColor(28, 28, 28))
+            palette.setColor(QtGui.QPalette.ColorRole.AlternateBase, QtGui.QColor(45, 45, 45))
+            palette.setColor(QtGui.QPalette.ColorRole.ToolTipBase, QtGui.QColor(60, 60, 60))
+            palette.setColor(QtGui.QPalette.ColorRole.ToolTipText, QtGui.QColor(235, 235, 235))
+            palette.setColor(QtGui.QPalette.ColorRole.Text, QtGui.QColor(235, 235, 235))
+            palette.setColor(QtGui.QPalette.ColorRole.Button, QtGui.QColor(50, 50, 50))
+            palette.setColor(QtGui.QPalette.ColorRole.ButtonText, QtGui.QColor(235, 235, 235))
+            palette.setColor(QtGui.QPalette.ColorRole.BrightText, QtGui.QColor(255, 85, 85))
+            palette.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor(90, 130, 255))
+            palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor(15, 15, 15))
+            palette.setColor(QtGui.QPalette.ColorRole.Link, QtGui.QColor(100, 160, 255))
             app.setPalette(palette)
+            app.setStyleSheet(
+                """
+                QWidget { color: #e5e5e5; background-color: #282828; }
+                QTreeWidget, QListWidget, QTableWidget, QTextEdit, QLineEdit, QComboBox, QSpinBox {
+                    background-color: #1f1f1f; color: #e5e5e5; selection-background-color: #5a82ff; }
+                QPushButton { background-color: #3a3a3a; color: #e5e5e5; border: 1px solid #4a4a4a; padding: 4px 6px; }
+                QPushButton:hover { background-color: #4a4a4a; }
+                QMenu { background-color: #2f2f2f; color: #e5e5e5; }
+                QStatusBar { background-color: #202020; color: #e5e5e5; }
+                QToolTip { color: #e5e5e5; background-color: #3a3a3a; border: 1px solid #5a5a5a; }
+                """
+            )
         else:
             app.setPalette(app.style().standardPalette())
+            app.setStyleSheet("")
+
+    def open_options_dialog(self) -> None:
+        dialog = OptionsDialog(self, self.show_only_elements, self.dark_mode_enabled)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            opts = dialog.values()
+            if opts["dark_mode"] != self.dark_mode_enabled:
+                self._toggle_dark_mode(opts["dark_mode"])
+            if opts["elements_only"] != self.show_only_elements:
+                self._toggle_elements_only(opts["elements_only"])
 
     def _build_tree(self, tree: QtWidgets.QTreeWidget, data: object) -> None:
         tree.clear()
@@ -501,6 +552,20 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             except Exception as exc:  # noqa: BLE001
                 self._notify(f"Falha ao aplicar frame: {exc}", "error")
 
+    def interpolate_animation_frames(self) -> None:
+        if not (self.logic.project1_archive or self.logic.project2_archive):
+            self._notify("Carregue algum projeto antes", "warning")
+            return
+        dialog = FrameInterpolationDialog(self, self.logic)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            try:
+                selection = dialog.selection()
+                self.logic.interpolate_frames(**selection)
+                self._refresh_animation_lists()
+                self._notify("Frames interpolados com sucesso", "success")
+            except Exception as exc:  # noqa: BLE001
+                self._notify(f"Falha ao interpolar frames: {exc}", "error")
+
     def _refresh_animation_lists(self) -> None:
         self.anim_list1.clear()
         self.anim_list2.clear()
@@ -567,8 +632,8 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         dialog = MovementDialog(self, self.logic)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self._build_tree(self.tree2, self.logic.json2)
-            if self.elements_only_checkbox.isChecked():
-                self._toggle_elements_only()
+            if self.show_only_elements:
+                self._toggle_elements_only(True)
 
     def open_affix_dialog(self) -> None:
         if not self.logic.json2:
@@ -1015,6 +1080,122 @@ class FrameApplyDialog(QtWidgets.QDialog):
             raise ValueError("Nenhuma animação selecionada")
         project, path = data
         return project, path, self.spin.value()
+
+
+class FrameInterpolationDialog(QtWidgets.QDialog):
+    def __init__(self, parent: JSONMergerWindow, logic: JSONMergerLogic) -> None:
+        super().__init__(parent)
+        self.logic = logic
+        self.anim_entries: list[tuple[int, str, str]] = []
+        self.setWindowTitle("Interpolar frames")
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QtWidgets.QVBoxLayout(self)
+
+        self.combo_anim = QtWidgets.QComboBox()
+        self._populate_animations()
+        self.combo_anim.currentIndexChanged.connect(self._on_anim_changed)
+        layout.addWidget(self.combo_anim)
+
+        form = QtWidgets.QFormLayout()
+        self.spin_start = QtWidgets.QSpinBox()
+        self.spin_start.setMinimum(0)
+        form.addRow("Frame inicial", self.spin_start)
+
+        self.spin_end = QtWidgets.QSpinBox()
+        self.spin_end.setMinimum(0)
+        form.addRow("Frame final", self.spin_end)
+
+        self.spin_insert = QtWidgets.QSpinBox()
+        self.spin_insert.setMinimum(1)
+        self.spin_insert.setValue(1)
+        form.addRow("Frames a inserir", self.spin_insert)
+        layout.addLayout(form)
+
+        self.radio_same = QtWidgets.QRadioButton("Salvar na mesma animação")
+        self.radio_new = QtWidgets.QRadioButton("Salvar como nova")
+        self.radio_same.setChecked(True)
+        radios = QtWidgets.QHBoxLayout()
+        radios.addWidget(self.radio_same)
+        radios.addWidget(self.radio_new)
+        layout.addLayout(radios)
+
+        self.new_name_edit = QtWidgets.QLineEdit()
+        self.new_name_edit.setPlaceholderText("Novo nome do arquivo (opcional)")
+        self.new_name_edit.setEnabled(False)
+        layout.addWidget(self.new_name_edit)
+
+        self.radio_new.toggled.connect(self._toggle_new_name)
+
+        buttons = QtWidgets.QHBoxLayout()
+        ok_btn = QtWidgets.QPushButton("Interpolar")
+        ok_btn.clicked.connect(self._validate_and_accept)
+        cancel_btn = QtWidgets.QPushButton("Cancelar")
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(ok_btn)
+        buttons.addWidget(cancel_btn)
+        layout.addLayout(buttons)
+
+        self._on_anim_changed(0)
+
+    def _populate_animations(self) -> None:
+        self.combo_anim.clear()
+        self.anim_entries.clear()
+        for project in (1, 2):
+            for item in self.logic.list_animations(project):
+                label_prefix = "P1" if project == 1 else "P2"
+                label = f"{label_prefix}: {item['label']}"
+                self.combo_anim.addItem(label, userData=(project, item["path"]))
+                self.anim_entries.append((project, item["path"], label))
+
+    def _toggle_new_name(self, enabled: bool) -> None:
+        self.new_name_edit.setEnabled(enabled)
+
+    def _on_anim_changed(self, index: int) -> None:
+        data = self.combo_anim.itemData(index)
+        if not data:
+            self.spin_start.setMaximum(0)
+            self.spin_end.setMaximum(0)
+            return
+        project, path = data
+        try:
+            anim = self.logic.load_animation(project, path)
+            frames = anim.get("frames", [])
+            total = len(frames) if isinstance(frames, list) else 0
+            max_idx = max(total - 1, 0)
+            self.spin_start.setMaximum(max_idx)
+            self.spin_end.setMaximum(max_idx)
+            self.spin_end.setValue(min(1, max_idx))
+            base_name = path.split("/")[-1]
+            self.new_name_edit.setText(base_name.replace(".json", "_interp.json"))
+        except Exception:
+            self.spin_start.setMaximum(0)
+            self.spin_end.setMaximum(0)
+
+    def _validate_and_accept(self) -> None:
+        if self.spin_start.value() >= self.spin_end.value():
+            QtWidgets.QMessageBox.warning(self, "Aviso", "Frame inicial deve ser menor que o final")
+            return
+        if self.radio_new.isChecked() and not self.new_name_edit.text().strip():
+            QtWidgets.QMessageBox.warning(self, "Aviso", "Informe o novo nome do arquivo")
+            return
+        self.accept()
+
+    def selection(self) -> dict[str, object]:
+        data = self.combo_anim.currentData()
+        if not data:
+            raise ValueError("Nenhuma animação selecionada")
+        project, path = data
+        new_name = self.new_name_edit.text().strip() if self.radio_new.isChecked() else None
+        return {
+            "project": project,
+            "path": path,
+            "start_idx": self.spin_start.value(),
+            "end_idx": self.spin_end.value(),
+            "insert_count": self.spin_insert.value(),
+            "new_name": new_name,
+        }
 
 
 def run_app() -> None:
