@@ -10,13 +10,21 @@ class JSONMergerLogic:
         self.json2: Any = {}
         self.project2_path: str | None = None
         self.project2_archive: dict[str, bytes] = {}
+        self.project1_archive: dict[str, bytes] = {}
         self.clipboard: Any = None
         self.clipboard_mode: str | None = None
         self.clipboard_orig_path: List[int | str] | None = None
+        self.animation_clipboard: dict[str, Any] | None = None
+        self.animation_clipboard_name: str | None = None
 
     def load_project1(self, path: str) -> None:
-        raw_json = self._read_config_from_archive(path)
-        self.json1 = json.loads(raw_json)
+        with zipfile.ZipFile(path, "r") as archive:
+            self.project1_archive = {n: archive.read(n) for n in archive.namelist()}
+            config_names = [n for n in archive.namelist() if n.lower().endswith("config.json")]
+            if not config_names:
+                raise ValueError("Nenhum config.json no projeto")
+            raw_json = self._decode_bytes(self.project1_archive[config_names[0]])
+            self.json1 = json.loads(raw_json)
 
     def load_project2(self, path: str) -> None:
         with zipfile.ZipFile(path, "r") as archive:
@@ -53,6 +61,8 @@ class JSONMergerLogic:
         self.clipboard = None
         self.clipboard_mode = None
         self.clipboard_orig_path = None
+        self.animation_clipboard = None
+        self.animation_clipboard_name = None
 
     def get_by_path(self, data: Any, path: List[int | str]) -> Any:
         current = data
@@ -222,6 +232,57 @@ class JSONMergerLogic:
         ):
             self._apply_per_face_uv(anti_refs[key]["obj"], skin_x128)
         self._call_debug(debug_hook, "textura")
+
+    def list_animations(self, project: int) -> list[dict[str, str]]:
+        archive = self.project1_archive if project == 1 else self.project2_archive
+        items: list[dict[str, str]] = []
+        for name in archive:
+            if name.startswith("animations/") and name.lower().endswith(".json"):
+                parsed = self._parse_animation_name(name.split("/")[-1])
+                items.append(parsed | {"path": name})
+        return items
+
+    def copy_animation_from_project1(self, path: str) -> None:
+        if path not in self.project1_archive:
+            raise ValueError("Animação não encontrada no Projeto 1")
+        raw = self._decode_bytes(self.project1_archive[path])
+        self.animation_clipboard = json.loads(raw)
+        self.animation_clipboard_name = path.split("/")[-1]
+
+    def paste_animation_to_project2(self, mapping: dict[int, int]) -> None:
+        if self.animation_clipboard is None or self.animation_clipboard_name is None:
+            raise ValueError("Nenhuma animação copiada")
+        cloned = copy.deepcopy(self.animation_clipboard)
+        self._apply_storeid_mapping(cloned, mapping)
+        target_path = f"animations/{self.animation_clipboard_name}"
+        self.project2_archive[target_path] = json.dumps(cloned, indent=2, ensure_ascii=False).encode("utf-8")
+
+    def extract_store_ids(self, animation_json: dict[str, Any]) -> list[int]:
+        ids: set[int] = set()
+        for frame in animation_json.get("frames", []):
+            comps = frame.get("components", [])
+            if isinstance(comps, list):
+                for comp in comps:
+                    store = comp.get("storeID")
+                    if isinstance(store, int):
+                        ids.add(store)
+        return sorted(ids)
+
+    def extract_store_ids_from_model(self) -> list[int]:
+        ids: set[int] = set()
+
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                if "storeID" in node and isinstance(node["storeID"], int):
+                    ids.add(node["storeID"])
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(self.json2)
+        return sorted(ids)
 
     def _read_config_from_archive(self, path: str) -> str:
         with zipfile.ZipFile(path, "r") as archive:
@@ -407,6 +468,39 @@ class JSONMergerLogic:
         element["faceUV"] = face_uv
         element["u"] = u
         element["v"] = v
+
+    def _parse_animation_name(self, filename: str) -> dict[str, str]:
+        base = filename[:-5] if filename.lower().endswith(".json") else filename
+        parts = base.split("_")
+        prefix = parts[0] if parts else ""
+        uuid = parts[-1] if parts else ""
+        rest = parts[1:-1] if len(parts) > 2 else (parts[1:] if len(parts) == 2 else [])
+        action = ""
+        anim_name = ""
+        if rest:
+            anim_name = rest[-1]
+            if len(rest) > 1:
+                action = " ".join(rest[:-1]).replace("-", " ")
+        label_type = "Pose" if prefix == "v" else "Value/Layer" if prefix == "g" else prefix
+        return {
+            "prefix": prefix,
+            "type": label_type,
+            "action": action,
+            "name": anim_name,
+            "uuid": uuid,
+            "filename": filename,
+            "label": f"{label_type}: {anim_name or '(sem nome)'}" + (f" ({action})" if action else ""),
+        }
+
+    def _apply_storeid_mapping(self, animation_json: dict[str, Any], mapping: dict[int, int]) -> None:
+        for frame in animation_json.get("frames", []):
+            comps = frame.get("components", [])
+            if not isinstance(comps, list):
+                continue
+            for comp in comps:
+                store = comp.get("storeID")
+                if isinstance(store, int) and store in mapping:
+                    comp["storeID"] = mapping[store]
 
     @staticmethod
     def _extract_uv(element: dict[str, Any]) -> tuple[float, float] | None:

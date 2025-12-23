@@ -42,11 +42,17 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         self.btn_save_as.clicked.connect(self.save_project2_as)
         top_button_row.addWidget(self.btn_save_as)
 
-        # --- Barra de ferramentas: espaçamento e margens corretos (não sobrescrever tools_row)
+        self.tabs = QtWidgets.QTabWidget()
+        layout.addWidget(self.tabs, 1)
+
+        # ----- Aba de Modelos
+        models_tab = QtWidgets.QWidget()
+        models_layout = QtWidgets.QVBoxLayout(models_tab)
+
         tools_row = QtWidgets.QHBoxLayout()
         tools_row.setSpacing(4)
         tools_row.setContentsMargins(4, 2, 4, 2)
-        layout.addLayout(tools_row)
+        models_layout.addLayout(tools_row)
 
         tools_row.addWidget(self._create_tool_button("🔍", "Pesquisar", self.open_search_dialog))
         tools_row.addWidget(self._create_tool_button("✥", "Mover textura / Ajustar UV", self.open_uv_dialog))
@@ -56,10 +62,10 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
 
         self.elements_only_checkbox = QtWidgets.QCheckBox("apenas Elementos")
         self.elements_only_checkbox.stateChanged.connect(self._toggle_elements_only)
-        layout.addWidget(self.elements_only_checkbox)
+        models_layout.addWidget(self.elements_only_checkbox)
 
         splitter = QtWidgets.QSplitter()
-        layout.addWidget(splitter, 1)
+        models_layout.addWidget(splitter, 1)
 
         left_panel = QtWidgets.QWidget()
         left_layout = QtWidgets.QVBoxLayout(left_panel)
@@ -88,6 +94,45 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
 
+        self.tabs.addTab(models_tab, "Modelos")
+
+        # ----- Aba de Animações
+        animations_tab = QtWidgets.QWidget()
+        anim_layout = QtWidgets.QVBoxLayout(animations_tab)
+
+        anim_buttons = QtWidgets.QHBoxLayout()
+        self.btn_copy_anim = QtWidgets.QPushButton("Copiar animação do Projeto 1")
+        self.btn_copy_anim.clicked.connect(self.copy_animation)
+        anim_buttons.addWidget(self.btn_copy_anim)
+
+        self.btn_paste_anim = QtWidgets.QPushButton("Colar animação no Projeto 2")
+        self.btn_paste_anim.clicked.connect(self.paste_animation)
+        anim_buttons.addWidget(self.btn_paste_anim)
+
+        anim_layout.addLayout(anim_buttons)
+
+        anim_splitter = QtWidgets.QSplitter()
+        anim_layout.addWidget(anim_splitter, 1)
+
+        anim_left = QtWidgets.QWidget()
+        anim_left_layout = QtWidgets.QVBoxLayout(anim_left)
+        anim_left_layout.addWidget(QtWidgets.QLabel("Animações Projeto 1"))
+        self.anim_list1 = QtWidgets.QListWidget()
+        anim_left_layout.addWidget(self.anim_list1)
+        anim_splitter.addWidget(anim_left)
+
+        anim_right = QtWidgets.QWidget()
+        anim_right_layout = QtWidgets.QVBoxLayout(anim_right)
+        anim_right_layout.addWidget(QtWidgets.QLabel("Animações Projeto 2"))
+        self.anim_list2 = QtWidgets.QListWidget()
+        anim_right_layout.addWidget(self.anim_list2)
+        anim_splitter.addWidget(anim_right)
+
+        anim_splitter.setStretchFactor(0, 1)
+        anim_splitter.setStretchFactor(1, 1)
+
+        self.tabs.addTab(animations_tab, "Animações")
+
         self.setCentralWidget(central)
 
     def load_project1(self) -> None:
@@ -99,6 +144,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         try:
             self.logic.load_project1(path)
             self._build_tree(self.tree1, self.logic.json1)
+            self._refresh_animation_lists()
             self.clear_search()
             self.logic.clear_clipboard()
         except Exception as exc:  # noqa: BLE001
@@ -113,6 +159,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         try:
             self.logic.load_project2(path)
             self._build_tree(self.tree2, self.logic.json2)
+            self._refresh_animation_lists()
             self.clear_search()
             self.logic.clear_clipboard()
         except Exception as exc:  # noqa: BLE001
@@ -334,6 +381,47 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
             result.append(top)
             result.extend(walk(top))
         return result
+
+    def copy_animation(self) -> None:
+        current = self.anim_list1.currentItem()
+        if not current:
+            QtWidgets.QMessageBox.warning(self, "Aviso", "Selecione uma animação em Projeto 1")
+            return
+        path = current.data(QtCore.Qt.ItemDataRole.UserRole)
+        try:
+            self.logic.copy_animation_from_project1(path)
+            QtWidgets.QMessageBox.information(self, "Sucesso", "Animação copiada!")
+        except Exception as exc:  # noqa: BLE001
+            QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao copiar animação:\n{exc}")
+
+    def paste_animation(self) -> None:
+        if self.logic.animation_clipboard is None:
+            QtWidgets.QMessageBox.warning(self, "Aviso", "Nenhuma animação copiada")
+            return
+        if not self.logic.project2_archive:
+            QtWidgets.QMessageBox.warning(self, "Aviso", "Carregue o Projeto 2 primeiro")
+            return
+        mapping_dialog = AnimationMappingDialog(self, self.logic)
+        if mapping_dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            mapping = mapping_dialog.get_mapping()
+            try:
+                self.logic.paste_animation_to_project2(mapping)
+                QtWidgets.QMessageBox.information(self, "Sucesso", "Animação colada no Projeto 2")
+                self._refresh_animation_lists()
+            except Exception as exc:  # noqa: BLE001
+                QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao colar animação:\n{exc}")
+
+    def _refresh_animation_lists(self) -> None:
+        self.anim_list1.clear()
+        self.anim_list2.clear()
+        for item in self.logic.list_animations(1):
+            list_item = QtWidgets.QListWidgetItem(item["label"])
+            list_item.setData(QtCore.Qt.ItemDataRole.UserRole, item["path"])
+            self.anim_list1.addItem(list_item)
+        for item in self.logic.list_animations(2):
+            list_item = QtWidgets.QListWidgetItem(item["label"])
+            list_item.setData(QtCore.Qt.ItemDataRole.UserRole, item["path"])
+            self.anim_list2.addItem(list_item)
 
     @staticmethod
     def _item_path(item: QtWidgets.QTreeWidgetItem) -> List[int | str]:
@@ -585,6 +673,52 @@ class MovementDialog(QtWidgets.QDialog):
                 if text == target:
                     combo.setCurrentIndex(index)
                     break
+
+
+class AnimationMappingDialog(QtWidgets.QDialog):
+    def __init__(self, parent: JSONMergerWindow, logic: JSONMergerLogic) -> None:
+        super().__init__(parent)
+        self.logic = logic
+        self.setWindowTitle("Mapear elementos da animação")
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QtWidgets.QVBoxLayout(self)
+        if self.logic.animation_clipboard is None:
+            QtWidgets.QMessageBox.critical(self, "Erro", "Nenhuma animação para mapear.")
+            self.reject()
+            return
+        source_ids = self.logic.extract_store_ids(self.logic.animation_clipboard)
+        target_ids = self.logic.extract_store_ids_from_model()
+
+        form = QtWidgets.QFormLayout()
+        self.combos: dict[int, QtWidgets.QComboBox] = {}
+        for sid in source_ids:
+            combo = QtWidgets.QComboBox()
+            combo.addItem(f"Manter ({sid})", userData=sid)
+            for tid in target_ids:
+                combo.addItem(str(tid), userData=tid)
+            form.addRow(f"storeID {sid}", combo)
+            self.combos[sid] = combo
+        layout.addLayout(form)
+
+        buttons = QtWidgets.QHBoxLayout()
+        btn_ok = QtWidgets.QPushButton("OK")
+        btn_ok.clicked.connect(self.accept)
+        buttons.addWidget(btn_ok)
+
+        btn_cancel = QtWidgets.QPushButton("Cancelar")
+        btn_cancel.clicked.connect(self.reject)
+        buttons.addWidget(btn_cancel)
+        layout.addLayout(buttons)
+
+    def get_mapping(self) -> dict[int, int]:
+        mapping: dict[int, int] = {}
+        for sid, combo in self.combos.items():
+            val = combo.currentData()
+            if isinstance(val, int) and val != sid:
+                mapping[sid] = val
+        return mapping
 
 def run_app() -> None:
     app = QtWidgets.QApplication(sys.argv)
