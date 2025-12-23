@@ -128,6 +128,10 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.btn_paste_anim.clicked.connect(self.paste_animation)
         anim_buttons.addWidget(self.btn_paste_anim)
 
+        self.btn_apply_frame = QtWidgets.QPushButton("Aplicar frame ao modelo")
+        self.btn_apply_frame.clicked.connect(self.apply_frame_to_model)
+        anim_buttons.addWidget(self.btn_apply_frame)
+
         anim_layout.addLayout(anim_buttons)
 
         anim_splitter = QtWidgets.QSplitter()
@@ -396,23 +400,12 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         return result
 
     def colorize_hierarchy(self) -> None:
-        for tree in (self.tree1, self.tree2):
-            self._apply_hierarchy_colors(tree)
-        self._notify("Hierarquia colorida", "info")
-
-    def _apply_hierarchy_colors(self, tree: QtWidgets.QTreeWidget) -> None:
-        colors = ["#ffffff", "#33cc33", "#00aaff", "#ffd93d", "#ff66c4", "#ff4d4f", "#aaaaaa"]
-
-        def apply_color(item: QtWidgets.QTreeWidgetItem) -> None:
-            path = self._item_path(item)
-            depth = len(path)
-            color = QtGui.QColor(colors[depth % len(colors)])
-            item.setForeground(0, QtGui.QBrush(color))
-            for i in range(item.childCount()):
-                apply_color(item.child(i))
-
-        for idx in range(tree.topLevelItemCount()):
-            apply_color(tree.topLevelItem(idx))
+        try:
+            self.logic.apply_name_colors()
+            self._build_tree(self.tree2, self.logic.json2)
+            self._notify("Cores aplicadas por hierarquia no config.json", "success")
+        except Exception as exc:  # noqa: BLE001
+            self._notify(f"Falha ao colorir: {exc}", "error")
 
     def copy_animation(self) -> None:
         current = self.anim_list1.currentItem()
@@ -442,6 +435,20 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
                 self._refresh_animation_lists()
             except Exception as exc:  # noqa: BLE001
                 self._notify(f"Falha ao colar animação: {exc}", "error")
+
+    def apply_frame_to_model(self) -> None:
+        if not self.logic.project2_archive:
+            self._notify("Carregue o Projeto 2 primeiro", "warning")
+            return
+        dialog = FrameApplyDialog(self, self.logic)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            try:
+                project, path, frame_idx = dialog.selection()
+                self.logic.apply_frame_to_model(project, path, frame_idx)
+                self._build_tree(self.tree2, self.logic.json2)
+                self._notify("Frame aplicado ao modelo", "success")
+            except Exception as exc:  # noqa: BLE001
+                self._notify(f"Falha ao aplicar frame: {exc}", "error")
 
     def _refresh_animation_lists(self) -> None:
         self.anim_list1.clear()
@@ -737,8 +744,9 @@ class AnimationMappingDialog(QtWidgets.QDialog):
         short = lambda val: str(val)[-6:] if isinstance(val, int) and len(str(val)) > 6 else str(val)
         for idx, sid in enumerate(source_ids):
             combo = QtWidgets.QComboBox()
-            combo.setMinimumWidth(180)
-            combo.view().setMinimumWidth(200)
+            combo.setMinimumWidth(120)
+            combo.setMaximumWidth(150)
+            combo.view().setMinimumWidth(150)
             combo.addItem(f"Manter ({short(sid)})", userData=sid)
             for tid in target_ids:
                 text = target_names.get(tid, str(tid))
@@ -770,6 +778,71 @@ class AnimationMappingDialog(QtWidgets.QDialog):
             if isinstance(val, int) and val != sid:
                 mapping[sid] = val
         return mapping
+
+
+class FrameApplyDialog(QtWidgets.QDialog):
+    def __init__(self, parent: JSONMergerWindow, logic: JSONMergerLogic) -> None:
+        super().__init__(parent)
+        self.logic = logic
+        self.setWindowTitle("Aplicar frame ao modelo")
+        self.anim_entries: list[tuple[int, str, str]] = []
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QtWidgets.QVBoxLayout(self)
+        self.combo = QtWidgets.QComboBox()
+        self._populate_animations()
+        self.combo.currentIndexChanged.connect(self._on_anim_changed)
+        layout.addWidget(self.combo)
+
+        frame_row = QtWidgets.QHBoxLayout()
+        frame_row.addWidget(QtWidgets.QLabel("Frame:"))
+        self.spin = QtWidgets.QSpinBox()
+        self.spin.setMinimum(0)
+        frame_row.addWidget(self.spin)
+        layout.addLayout(frame_row)
+
+        buttons = QtWidgets.QHBoxLayout()
+        btn_ok = QtWidgets.QPushButton("Aplicar")
+        btn_ok.clicked.connect(self.accept)
+        buttons.addWidget(btn_ok)
+        btn_cancel = QtWidgets.QPushButton("Cancelar")
+        btn_cancel.clicked.connect(self.reject)
+        buttons.addWidget(btn_cancel)
+        layout.addLayout(buttons)
+
+        self._on_anim_changed(0)
+
+    def _populate_animations(self) -> None:
+        self.combo.clear()
+        self.anim_entries.clear()
+        for project in (1, 2):
+            for item in self.logic.list_animations(project):
+                label_prefix = "P1" if project == 1 else "P2"
+                label = f"{label_prefix}: {item['label']}"
+                self.combo.addItem(label, userData=(project, item["path"]))
+                self.anim_entries.append((project, item["path"], label))
+
+    def _on_anim_changed(self, index: int) -> None:
+        data = self.combo.itemData(index)
+        if not data:
+            self.spin.setMaximum(0)
+            return
+        project, path = data
+        try:
+            anim = self.logic.load_animation(project, path)
+            frames = anim.get("frames", [])
+            total = len(frames) if isinstance(frames, list) else 0
+            self.spin.setMaximum(max(total - 1, 0))
+        except Exception:
+            self.spin.setMaximum(0)
+
+    def selection(self) -> tuple[int, str, int]:
+        data = self.combo.currentData()
+        if not data:
+            raise ValueError("Nenhuma animação selecionada")
+        project, path = data
+        return project, path, self.spin.value()
 
 
 def run_app() -> None:

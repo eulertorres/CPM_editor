@@ -16,6 +16,7 @@ class JSONMergerLogic:
         self.clipboard_orig_path: List[int | str] | None = None
         self.animation_clipboard: dict[str, Any] | None = None
         self.animation_clipboard_name: str | None = None
+        self.animation_clipboard_project: int | None = None
 
     def load_project1(self, path: str) -> None:
         with zipfile.ZipFile(path, "r") as archive:
@@ -248,6 +249,7 @@ class JSONMergerLogic:
         raw = self._decode_bytes(self.project1_archive[path])
         self.animation_clipboard = json.loads(raw)
         self.animation_clipboard_name = path.split("/")[-1]
+        self.animation_clipboard_project = 1
 
     def paste_animation_to_project2(self, mapping: dict[int, int]) -> None:
         if self.animation_clipboard is None or self.animation_clipboard_name is None:
@@ -256,6 +258,62 @@ class JSONMergerLogic:
         self._apply_storeid_mapping(cloned, mapping)
         target_path = f"animations/{self.animation_clipboard_name}"
         self.project2_archive[target_path] = json.dumps(cloned, indent=2, ensure_ascii=False).encode("utf-8")
+
+    def load_animation(self, project: int, path: str) -> dict[str, Any]:
+        archive = self.project1_archive if project == 1 else self.project2_archive
+        if path not in archive:
+            raise ValueError("Animação não encontrada")
+        raw = self._decode_bytes(archive[path])
+        return json.loads(raw)
+
+    def apply_frame_to_model(self, project: int, path: str, frame_index: int) -> None:
+        if not self.project2_archive:
+            raise ValueError("Carregue o Projeto 2 antes")
+        anim = self.load_animation(project, path)
+        frames = anim.get("frames", [])
+        if not isinstance(frames, list) or frame_index < 0 or frame_index >= len(frames):
+            raise ValueError("Frame inválido")
+        frame = frames[frame_index]
+        components = frame.get("components", []) if isinstance(frame, dict) else []
+        if not isinstance(components, list):
+            raise ValueError("Frame sem componentes")
+
+        store_map = self._storeid_node_map(self.json2)
+        for comp in components:
+            if not isinstance(comp, dict):
+                continue
+            sid = comp.get("storeID")
+            if not isinstance(sid, int) or sid not in store_map:
+                continue
+            for target in store_map[sid]:
+                self._apply_transform_to_node(target, comp)
+
+    def apply_name_colors(self) -> None:
+        colors = [
+            0xFFFFFF,
+            0xFF00FF,
+            0x33CC33,
+            0x00AAFF,
+            0xFFD93D,
+            0xFF66C4,
+            0xFF4D4F,
+            0xAAAAAA,
+        ]
+
+        def walk(node: Any, depth: int) -> None:
+            if isinstance(node, dict):
+                if any(k in node for k in ("name", "id", "storeID")):
+                    node["nameColor"] = colors[depth % len(colors)]
+                for key in ("children", "elements"):
+                    val = node.get(key)
+                    if isinstance(val, list):
+                        for child in val:
+                            walk(child, depth + 1)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item, depth)
+
+        walk(self.json2, 0)
 
     def extract_store_ids(self, animation_json: dict[str, Any]) -> list[int]:
         ids: set[int] = set()
@@ -521,6 +579,33 @@ class JSONMergerLogic:
                 store = comp.get("storeID")
                 if isinstance(store, int) and store in mapping:
                     comp["storeID"] = mapping[store]
+
+    @staticmethod
+    def _storeid_node_map(node: Any) -> dict[int, list[dict[str, Any]]]:
+        result: dict[int, list[dict[str, Any]]] = {}
+
+        def walk(cur: Any) -> None:
+            if isinstance(cur, dict):
+                sid = cur.get("storeID")
+                if isinstance(sid, int):
+                    result.setdefault(sid, []).append(cur)
+                for value in cur.values():
+                    walk(value)
+            elif isinstance(cur, list):
+                for item in cur:
+                    walk(item)
+
+        walk(node)
+        return result
+
+    @staticmethod
+    def _apply_transform_to_node(node: dict[str, Any], comp: dict[str, Any]) -> None:
+        if not isinstance(node, dict):
+            return
+        if "pos" in comp and isinstance(comp["pos"], (dict, list)):
+            node["pos"] = copy.deepcopy(comp["pos"])
+        if "rotation" in comp and isinstance(comp["rotation"], (dict, list)):
+            node["rotation"] = copy.deepcopy(comp["rotation"])
 
     @staticmethod
     def _extract_uv(element: dict[str, Any]) -> tuple[float, float] | None:
