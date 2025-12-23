@@ -101,6 +101,32 @@ class JSONMergerLogic:
             for item in node:
                 self.adjust_uv(item, du, dv)
 
+    def compute_uv_bbox(self, element: dict[str, Any]) -> tuple[int, int, int, int] | None:
+        if not isinstance(element, dict):
+            return None
+        if "faceUV" in element and isinstance(element["faceUV"], dict):
+            coords = [
+                face
+                for face in element["faceUV"].values()
+                if isinstance(face, dict) and {"sx", "sy", "ex", "ey"} <= face.keys()
+            ]
+            if coords:
+                min_x = min(float(c["sx"]) for c in coords)
+                max_x = max(float(c["ex"]) for c in coords)
+                min_y = min(float(c["sy"]) for c in coords)
+                max_y = max(float(c["ey"]) for c in coords)
+                return int(min_x), int(min_y), int(max_x), int(max_y)
+
+        uv = self._extract_uv(element)
+        size = self._extract_size(element)
+        if uv is None or size is None:
+            return None
+        u, v = uv
+        x, y, z = size
+        width = 2 * (x + z)
+        height = y + z
+        return int(u), int(v), int(u + width), int(v + height)
+
     def copy_from_json1(self, path: List[int | str]) -> None:
         self.clipboard = copy.deepcopy(self.get_by_path(self.json1, path))
         self.clipboard_mode = "copy"
@@ -289,16 +315,7 @@ class JSONMergerLogic:
                 self._apply_transform_to_node(target, comp)
 
     def apply_name_colors(self) -> None:
-        colors = [
-            0xFFFFFF,
-            0xFF00FF,
-            0x33CC33,
-            0x00AAFF,
-            0xFFD93D,
-            0xFF66C4,
-            0xFF4D4F,
-            0xAAAAAA,
-        ]
+        colors = [0x24FFFF, 0x00FF00, 0xFFFF00, 0x00FF89]
 
         def walk(node: Any, depth: int) -> None:
             if isinstance(node, dict):
@@ -603,9 +620,33 @@ class JSONMergerLogic:
         if not isinstance(node, dict):
             return
         if "pos" in comp and isinstance(comp["pos"], (dict, list)):
-            node["pos"] = copy.deepcopy(comp["pos"])
+            node["pos"] = JSONMergerLogic._sum_vectors(node.get("pos"), comp["pos"])
         if "rotation" in comp and isinstance(comp["rotation"], (dict, list)):
-            node["rotation"] = copy.deepcopy(comp["rotation"])
+            node["rotation"] = JSONMergerLogic._sum_vectors(
+                node.get("rotation"), comp["rotation"]
+            )
+
+    @staticmethod
+    def _sum_vectors(base: Any, delta: Any) -> Any:
+        def _as_dict(vec: Any) -> dict[str, float] | None:
+            if isinstance(vec, dict):
+                return {
+                    k: float(v)
+                    for k, v in vec.items()
+                    if k in {"x", "y", "z", "X", "Y", "Z"} and isinstance(v, (int, float))
+                }
+            if isinstance(vec, list) and len(vec) >= 3:
+                return {"x": float(vec[0]), "y": float(vec[1]), "z": float(vec[2])}
+            return None
+
+        base_dict = _as_dict(base) or {"x": 0.0, "y": 0.0, "z": 0.0}
+        delta_dict = _as_dict(delta) or {"x": 0.0, "y": 0.0, "z": 0.0}
+        result = {
+            "x": base_dict.get("x", 0.0) + delta_dict.get("x", 0.0),
+            "y": base_dict.get("y", 0.0) + delta_dict.get("y", 0.0),
+            "z": base_dict.get("z", 0.0) + delta_dict.get("z", 0.0),
+        }
+        return result
 
     @staticmethod
     def _extract_uv(element: dict[str, Any]) -> tuple[float, float] | None:

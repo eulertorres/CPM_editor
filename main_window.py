@@ -17,7 +17,9 @@ class StatusMixin:
         if target:
             colors = {"info": "#7a7a7a", "success": "#2e8b57", "warning": "#cc8800", "error": "#c0392b"}
             color = colors.get(level, "#7a7a7a")
-            target.statusBar().setStyleSheet(f"QStatusBar{{color:{color}; padding:4px;}}")
+            target.statusBar().setStyleSheet(
+                f"QStatusBar{{color:{color}; padding:4px; font-size:12px;}}"
+            )
             target.statusBar().showMessage(message, 6000)
         else:
             QtWidgets.QMessageBox.information(self, "Info", message)
@@ -563,6 +565,18 @@ class UVShiftDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.parent_window = parent
         self.setWindowTitle("Mover textura (Shift UV)")
+        current = self.parent_window.tree2.currentItem()
+        if not current:
+            self.parent_window._notify("Selecione elemento em JSON 2 para ajustar UV", "warning")
+            self.reject()
+            return
+        self.element_path = self.parent_window._item_path(current)
+        self.element = self.parent_window.logic.get_by_path(self.parent_window.logic.json2, self.element_path)
+        self.texture_pixmap = self._load_texture_pixmap()
+        self.current_bbox = self.parent_window.logic.compute_uv_bbox(self.element)
+        self.scene: QtWidgets.QGraphicsScene | None = None
+        self.current_rect: QtWidgets.QGraphicsRectItem | None = None
+        self.shift_rect: QtWidgets.QGraphicsRectItem | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -581,6 +595,21 @@ class UVShiftDialog(QtWidgets.QDialog):
 
         layout.addLayout(form)
 
+        if self.texture_pixmap and self.current_bbox:
+            self.scene = QtWidgets.QGraphicsScene(self)
+            self.scene.addPixmap(self.texture_pixmap)
+            self.view = QtWidgets.QGraphicsView(self.scene)
+            self.view.setRenderHints(
+                QtGui.QPainter.RenderHint.Antialiasing
+                | QtGui.QPainter.RenderHint.SmoothPixmapTransform
+            )
+            layout.addWidget(self.view)
+            self._draw_bboxes()
+            self.du_input.valueChanged.connect(self._draw_bboxes)
+            self.dv_input.valueChanged.connect(self._draw_bboxes)
+        else:
+            layout.addWidget(QtWidgets.QLabel("Sem prévia de textura disponível."))
+
         buttons = QtWidgets.QHBoxLayout()
         btn_apply = QtWidgets.QPushButton("Aplicar")
         btn_apply.clicked.connect(self._apply_shift)
@@ -597,6 +626,37 @@ class UVShiftDialog(QtWidgets.QDialog):
         dv = int(self.dv_input.value())
         if self.parent_window.shift_uv(du, dv):
             self.accept()
+
+    def _load_texture_pixmap(self) -> QtGui.QPixmap | None:
+        if not self.parent_window.logic.project2_archive:
+            return None
+        for name, data in self.parent_window.logic.project2_archive.items():
+            if name.lower().endswith("skin.png"):
+                pixmap = QtGui.QPixmap()
+                if pixmap.loadFromData(data):
+                    return pixmap
+        return None
+
+    def _draw_bboxes(self) -> None:
+        if not self.scene or not self.current_bbox:
+            return
+        du = int(self.du_input.value())
+        dv = int(self.dv_input.value())
+        x1, y1, x2, y2 = self.current_bbox
+        shifted = (x1 + du, y1 + dv, x2 + du, y2 + dv)
+        for item in (self.current_rect, self.shift_rect):
+            if item:
+                self.scene.removeItem(item)
+        pen_current = QtGui.QPen(QtGui.QColor("red"))
+        pen_current.setWidth(2)
+        pen_shift = QtGui.QPen(QtGui.QColor("green"))
+        pen_shift.setWidth(2)
+        self.current_rect = self.scene.addRect(QtCore.QRectF(x1, y1, x2 - x1, y2 - y1), pen_current)
+        self.shift_rect = self.scene.addRect(
+            QtCore.QRectF(shifted[0], shifted[1], shifted[2] - shifted[0], shifted[3] - shifted[1]),
+            pen_shift,
+        )
+        self.view.fitInView(self.scene.itemsBoundingRect(), QtCore.Qt.AspectRatioMode.KeepAspectRatio)
 
 
 class MovementDialog(QtWidgets.QDialog):
