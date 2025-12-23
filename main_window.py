@@ -88,6 +88,9 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         tools_row.addWidget(self._create_tool_button("📋", "Colar", self.paste_element))
         tools_row.addWidget(self._create_tool_button("+Movment", "Gerar hierarquia +Movment", self.open_movement_dialog))
         tools_row.addWidget(self._create_tool_button("🎨", "Colorir hierarquia", self.colorize_hierarchy))
+        tools_row.addWidget(
+            self._create_tool_button("🔤", "Prefixo/Sufixo em nomes", self.open_affix_dialog)
+        )
 
         self.elements_only_checkbox = QtWidgets.QCheckBox("apenas Elementos")
         self.elements_only_checkbox.setChecked(True)
@@ -343,6 +346,21 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             self._insert_items(tree, root, data, [])
         tree.expandItem(root)
 
+    @staticmethod
+    def _color_from_namecolor(element: dict[str, object]) -> QtGui.QColor:
+        value = element.get("nameColor") if isinstance(element, dict) else None
+        color_val: int | None = None
+        if isinstance(value, int):
+            color_val = value
+        elif isinstance(value, str):
+            try:
+                color_val = int(value)
+            except ValueError:
+                color_val = None
+        if color_val is not None:
+            return QtGui.QColor(f"#{color_val:06x}")
+        return QtGui.QColor("#1b7fb3")
+
     def _insert_items(
         self,
         tree: QtWidgets.QTreeWidget,
@@ -366,7 +384,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
                 item = QtWidgets.QTreeWidgetItem([label])
                 item.setData(0, QtCore.Qt.ItemDataRole.UserRole, path + [idx])
                 if isinstance(element, dict):
-                    item.setForeground(0, QtGui.QBrush(QtGui.QColor("#1b7fb3")))
+                    item.setForeground(0, QtGui.QBrush(self._color_from_namecolor(element)))
                     font = item.font(0)
                     font.setBold(True)
                     item.setFont(0, font)
@@ -397,7 +415,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
                         label = element.get("id") or element.get("name") or f"[{idx}]"
                         item = QtWidgets.QTreeWidgetItem([label])
                         item.setData(0, QtCore.Qt.ItemDataRole.UserRole, path + [key, idx])
-                        item.setForeground(0, QtGui.QBrush(QtGui.QColor("#1b7fb3")))
+                        item.setForeground(0, QtGui.QBrush(self._color_from_namecolor(element)))
                         font = item.font(0)
                         font.setBold(True)
                         item.setFont(0, font)
@@ -552,6 +570,20 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             if self.elements_only_checkbox.isChecked():
                 self._toggle_elements_only()
 
+    def open_affix_dialog(self) -> None:
+        if not self.logic.json2:
+            self._notify("Carregue o Projeto 2 primeiro", "warning")
+            return
+        dialog = NameAffixDialog(self, self.logic)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            try:
+                path, prefix, suffix, include_children = dialog.values()
+                self.logic.apply_affixes(path, prefix, suffix, include_children)
+                self._build_tree(self.tree2, self.logic.json2)
+                self._notify("Prefixo/Sufixo aplicados", "success")
+            except Exception as exc:  # noqa: BLE001
+                self._notify(f"Falha ao aplicar prefixo/sufixo: {exc}", "error")
+
 
 class SearchDialog(QtWidgets.QDialog):
     def __init__(self, parent: JSONMergerWindow) -> None:
@@ -589,6 +621,55 @@ class SearchDialog(QtWidgets.QDialog):
 
     def _run_search(self) -> None:
         self.parent_window.perform_search(self.query_input.text(), self.scope_combo.currentText())
+
+
+class NameAffixDialog(QtWidgets.QDialog):
+    def __init__(self, parent: JSONMergerWindow, logic: JSONMergerLogic) -> None:
+        super().__init__(parent)
+        self.logic = logic
+        self.setWindowTitle("Prefixo/Sufixo")
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QtWidgets.QVBoxLayout(self)
+
+        form = QtWidgets.QFormLayout()
+        self.element_combo = QtWidgets.QComboBox()
+        for label, path in self.logic.list_elements():
+            self.element_combo.addItem(label, userData=path)
+        form.addRow("Elemento", self.element_combo)
+
+        self.prefix_input = QtWidgets.QLineEdit()
+        form.addRow("Prefixo", self.prefix_input)
+        self.suffix_input = QtWidgets.QLineEdit()
+        form.addRow("Sufixo", self.suffix_input)
+
+        self.children_checkbox = QtWidgets.QCheckBox("Aplicar nos filhos")
+        form.addRow("", self.children_checkbox)
+
+        layout.addLayout(form)
+
+        buttons = QtWidgets.QHBoxLayout()
+        btn_ok = QtWidgets.QPushButton("Aplicar")
+        btn_ok.clicked.connect(self.accept)
+        buttons.addWidget(btn_ok)
+
+        btn_cancel = QtWidgets.QPushButton("Cancelar")
+        btn_cancel.clicked.connect(self.reject)
+        buttons.addWidget(btn_cancel)
+
+        layout.addLayout(buttons)
+
+    def values(self) -> tuple[list[int | str], str, str, bool]:
+        path = self.element_combo.currentData()
+        if path is None:
+            raise ValueError("Selecione um elemento")
+        return (
+            list(path),
+            self.prefix_input.text().strip(),
+            self.suffix_input.text().strip(),
+            self.children_checkbox.isChecked(),
+        )
 
 
 class UVShiftDialog(QtWidgets.QDialog):

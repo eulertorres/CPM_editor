@@ -1,5 +1,6 @@
 import copy
 import json
+import re
 import zipfile
 from typing import Any, Callable, List, Optional
 
@@ -64,6 +65,65 @@ class JSONMergerLogic:
         self.clipboard_orig_path = None
         self.animation_clipboard = None
         self.animation_clipboard_name = None
+
+    def apply_affixes(
+        self,
+        path: List[int | str],
+        prefix: str,
+        suffix: str,
+        include_children: bool,
+    ) -> None:
+        node = self.get_by_path(self.json2, path)
+        if not isinstance(node, dict):
+            raise ValueError("Selecione um elemento válido para renomear")
+
+        def rename_element(el: Any) -> None:
+            if not isinstance(el, dict):
+                return
+            key = "name" if isinstance(el.get("name"), str) else ("id" if isinstance(el.get("id"), str) else None)
+            if not key:
+                return
+            base = self._strip_numeric_suffix(str(el[key]))
+            new_name = base
+            if prefix:
+                new_name = f"{prefix}{new_name}"
+            if suffix:
+                new_name = f"{new_name} {suffix}" if new_name else suffix
+            el[key] = new_name.strip()
+
+        rename_element(node)
+        if include_children:
+            for key in ("children", "elements"):
+                child_list = node.get(key)
+                if isinstance(child_list, list):
+                    for child in child_list:
+                        if isinstance(child, dict):
+                            self._rename_descendants(child, prefix, suffix)
+
+    def _rename_descendants(self, node: dict[str, Any], prefix: str, suffix: str) -> None:
+        def rename(el: Any) -> None:
+            if not isinstance(el, dict):
+                return
+            key = "name" if isinstance(el.get("name"), str) else ("id" if isinstance(el.get("id"), str) else None)
+            if key:
+                base = self._strip_numeric_suffix(str(el[key]))
+                new_name = base
+                if prefix:
+                    new_name = f"{prefix}{new_name}"
+                if suffix:
+                    new_name = f"{new_name} {suffix}" if new_name else suffix
+                el[key] = new_name.strip()
+            for child_key in ("children", "elements"):
+                arr = el.get(child_key)
+                if isinstance(arr, list):
+                    for ch in arr:
+                        rename(ch)
+
+        rename(node)
+
+    @staticmethod
+    def _strip_numeric_suffix(text: str) -> str:
+        return re.sub(r"\s*\(\d+\)", "", text).strip()
 
     def get_by_path(self, data: Any, path: List[int | str]) -> Any:
         current = data
