@@ -690,17 +690,25 @@ class AnimationMappingDialog(QtWidgets.QDialog):
             return
         source_ids = self.logic.extract_store_ids(self.logic.animation_clipboard)
         target_ids = self.logic.extract_store_ids_from_model()
+        source_names = self.logic.storeid_name_map(project=1)
+        target_names = self.logic.storeid_name_map(project=2)
 
-        form = QtWidgets.QFormLayout()
+        grid = QtWidgets.QGridLayout()
         self.combos: dict[int, QtWidgets.QComboBox] = {}
-        for sid in source_ids:
+        rows_per_col = 8
+        for idx, sid in enumerate(source_ids):
             combo = QtWidgets.QComboBox()
             combo.addItem(f"Manter ({sid})", userData=sid)
             for tid in target_ids:
-                combo.addItem(str(tid), userData=tid)
-            form.addRow(f"storeID {sid}", combo)
+                text = target_names.get(tid, str(tid))
+                combo.addItem(f"{text} ({tid})", userData=tid)
+            row = idx % rows_per_col
+            col = idx // rows_per_col
+            label_text = source_names.get(sid, f"storeID {sid}")
+            grid.addWidget(QtWidgets.QLabel(label_text), row, col * 2)
+            grid.addWidget(combo, row, col * 2 + 1)
             self.combos[sid] = combo
-        layout.addLayout(form)
+        layout.addLayout(grid)
 
         buttons = QtWidgets.QHBoxLayout()
         btn_ok = QtWidgets.QPushButton("OK")

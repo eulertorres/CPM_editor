@@ -284,6 +284,26 @@ class JSONMergerLogic:
         walk(self.json2)
         return sorted(ids)
 
+    def storeid_name_map(self, project: int = 2) -> dict[int, str]:
+        data = self.json2 if project == 2 else self.json1
+        mapping: dict[int, str] = {}
+
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                sid = node.get("storeID")
+                if isinstance(sid, int):
+                    name = node.get("name") or node.get("id")
+                    if isinstance(name, str) and sid not in mapping:
+                        mapping[sid] = name
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item)
+
+        walk(data)
+        return mapping
+
     def _read_config_from_archive(self, path: str) -> str:
         with zipfile.ZipFile(path, "r") as archive:
             names = [n for n in archive.namelist() if n.lower().endswith("config.json")]
