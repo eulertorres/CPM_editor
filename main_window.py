@@ -32,7 +32,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.search_results: list[QtWidgets.QTreeWidgetItem] = []
         self.search_index = 0
         self.last_search_scope: str | None = None
-        self.show_only_elements = False
+        self.show_only_elements = True
         self._setup_ui()
         self.statusBar().showMessage("Pronto")
 
@@ -62,6 +62,14 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.btn_save_as.clicked.connect(self.save_project2_as)
         top_button_row.addWidget(self.btn_save_as)
 
+        self.btn_options = QtWidgets.QPushButton("Opções")
+        self.options_menu = QtWidgets.QMenu(self)
+        self.dark_mode_action = self.options_menu.addAction("Modo escuro")
+        self.dark_mode_action.setCheckable(True)
+        self.dark_mode_action.toggled.connect(self._toggle_dark_mode)
+        self.btn_options.setMenu(self.options_menu)
+        top_button_row.addWidget(self.btn_options)
+
         self.tabs = QtWidgets.QTabWidget()
         layout.addWidget(self.tabs, 1)
 
@@ -82,6 +90,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         tools_row.addWidget(self._create_tool_button("🎨", "Colorir hierarquia", self.colorize_hierarchy))
 
         self.elements_only_checkbox = QtWidgets.QCheckBox("apenas Elementos")
+        self.elements_only_checkbox.setChecked(True)
         self.elements_only_checkbox.stateChanged.connect(self._toggle_elements_only)
         models_layout.addWidget(self.elements_only_checkbox)
 
@@ -299,6 +308,28 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             self._build_tree(self.tree1, self.logic.json1)
         if self.logic.json2:
             self._build_tree(self.tree2, self.logic.json2)
+
+    def _toggle_dark_mode(self, enabled: bool) -> None:
+        app = QtWidgets.QApplication.instance()
+        if not app:
+            return
+        if enabled:
+            palette = QtGui.QPalette()
+            palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor(53, 53, 53))
+            palette.setColor(QtGui.QPalette.ColorRole.WindowText, QtGui.QColor(220, 220, 220))
+            palette.setColor(QtGui.QPalette.ColorRole.Base, QtGui.QColor(35, 35, 35))
+            palette.setColor(QtGui.QPalette.ColorRole.AlternateBase, QtGui.QColor(53, 53, 53))
+            palette.setColor(QtGui.QPalette.ColorRole.ToolTipBase, QtGui.QColor(220, 220, 220))
+            palette.setColor(QtGui.QPalette.ColorRole.ToolTipText, QtGui.QColor(220, 220, 220))
+            palette.setColor(QtGui.QPalette.ColorRole.Text, QtGui.QColor(220, 220, 220))
+            palette.setColor(QtGui.QPalette.ColorRole.Button, QtGui.QColor(53, 53, 53))
+            palette.setColor(QtGui.QPalette.ColorRole.ButtonText, QtGui.QColor(220, 220, 220))
+            palette.setColor(QtGui.QPalette.ColorRole.BrightText, QtGui.QColor(255, 0, 0))
+            palette.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor(142, 45, 197).lighter())
+            palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor(0, 0, 0))
+            app.setPalette(palette)
+        else:
+            app.setPalette(app.style().standardPalette())
 
     def _build_tree(self, tree: QtWidgets.QTreeWidget, data: object) -> None:
         tree.clear()

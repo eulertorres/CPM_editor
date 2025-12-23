@@ -305,14 +305,44 @@ class JSONMergerLogic:
             raise ValueError("Frame sem componentes")
 
         store_map = self._storeid_node_map(self.json2)
+        base_transforms: dict[int, dict[str, Any]] = {}
         for comp in components:
             if not isinstance(comp, dict):
                 continue
             sid = comp.get("storeID")
-            if not isinstance(sid, int) or sid not in store_map:
+            if not isinstance(sid, int):
+                continue
+            base_transforms[sid] = {
+                "pos": comp.get("pos"),
+                "rotation": comp.get("rotation"),
+            }
+            if sid not in store_map:
                 continue
             for target in store_map[sid]:
                 self._apply_transform_to_node(target, comp)
+
+        # Normaliza os frames subtraindo o frame aplicado
+        if isinstance(frames, list):
+            for frm in frames:
+                comps = frm.get("components") if isinstance(frm, dict) else None
+                if not isinstance(comps, list):
+                    continue
+                for comp in comps:
+                    if not isinstance(comp, dict):
+                        continue
+                    sid = comp.get("storeID")
+                    base = base_transforms.get(sid or -1)
+                    if not base:
+                        continue
+                    if "pos" in base:
+                        comp["pos"] = self._subtract_vectors(comp.get("pos"), base["pos"])
+                    if "rotation" in base:
+                        comp["rotation"] = self._subtract_vectors(
+                            comp.get("rotation"), base["rotation"]
+                        )
+
+        target_archive = self.project1_archive if project == 1 else self.project2_archive
+        target_archive[path] = json.dumps(anim, indent=2, ensure_ascii=False).encode("utf-8")
 
     def apply_name_colors(self) -> None:
         colors = [0x24FFFF, 0x00FF00, 0xFFFF00, 0x00FF89]
@@ -645,6 +675,28 @@ class JSONMergerLogic:
             "x": base_dict.get("x", 0.0) + delta_dict.get("x", 0.0),
             "y": base_dict.get("y", 0.0) + delta_dict.get("y", 0.0),
             "z": base_dict.get("z", 0.0) + delta_dict.get("z", 0.0),
+        }
+        return result
+
+    @staticmethod
+    def _subtract_vectors(base: Any, delta: Any) -> Any:
+        def _as_dict(vec: Any) -> dict[str, float] | None:
+            if isinstance(vec, dict):
+                return {
+                    k: float(v)
+                    for k, v in vec.items()
+                    if k in {"x", "y", "z", "X", "Y", "Z"} and isinstance(v, (int, float))
+                }
+            if isinstance(vec, list) and len(vec) >= 3:
+                return {"x": float(vec[0]), "y": float(vec[1]), "z": float(vec[2])}
+            return None
+
+        base_dict = _as_dict(base) or {"x": 0.0, "y": 0.0, "z": 0.0}
+        delta_dict = _as_dict(delta) or {"x": 0.0, "y": 0.0, "z": 0.0}
+        result = {
+            "x": base_dict.get("x", 0.0) - delta_dict.get("x", 0.0),
+            "y": base_dict.get("y", 0.0) - delta_dict.get("y", 0.0),
+            "z": base_dict.get("z", 0.0) - delta_dict.get("z", 0.0),
         }
         return result
 
