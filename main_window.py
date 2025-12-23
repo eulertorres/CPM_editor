@@ -6,7 +6,24 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from json_merger import JSONMergerLogic
 
 
-class JSONMergerWindow(QtWidgets.QMainWindow):
+class StatusMixin:
+    def _notify(self, message: str, level: str = "info") -> None:
+        parent = self.parent() if hasattr(self, "parent") else None
+        target = None
+        if isinstance(self, QtWidgets.QMainWindow):
+            target = self
+        elif isinstance(parent, QtWidgets.QMainWindow):
+            target = parent
+        if target:
+            colors = {"info": "#7a7a7a", "success": "#2e8b57", "warning": "#cc8800", "error": "#c0392b"}
+            color = colors.get(level, "#7a7a7a")
+            target.statusBar().setStyleSheet(f"QStatusBar{{color:{color}; padding:4px;}}")
+            target.statusBar().showMessage(message, 6000)
+        else:
+            QtWidgets.QMessageBox.information(self, "Info", message)
+
+
+class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
     def __init__(self) -> None:
         super().__init__()
         self.logic = JSONMergerLogic()
@@ -15,6 +32,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         self.last_search_scope: str | None = None
         self.show_only_elements = False
         self._setup_ui()
+        self.statusBar().showMessage("Pronto")
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("CPM Project JSON Merger")
@@ -59,6 +77,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
         tools_row.addWidget(self._create_tool_button("📄", "Copiar", self.copy_element))
         tools_row.addWidget(self._create_tool_button("📋", "Colar", self.paste_element))
         tools_row.addWidget(self._create_tool_button("+Movment", "Gerar hierarquia +Movment", self.open_movement_dialog))
+        tools_row.addWidget(self._create_tool_button("🎨", "Colorir hierarquia", self.colorize_hierarchy))
 
         self.elements_only_checkbox = QtWidgets.QCheckBox("apenas Elementos")
         self.elements_only_checkbox.stateChanged.connect(self._toggle_elements_only)
@@ -147,8 +166,9 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
             self._refresh_animation_lists()
             self.clear_search()
             self.logic.clear_clipboard()
+            self._notify("Projeto 1 carregado", "info")
         except Exception as exc:  # noqa: BLE001
-            QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao carregar Projeto 1:\n{exc}")
+            self._notify(f"Falha ao carregar Projeto 1: {exc}", "error")
 
     def load_project2(self) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -162,15 +182,16 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
             self._refresh_animation_lists()
             self.clear_search()
             self.logic.clear_clipboard()
+            self._notify("Projeto 2 carregado", "info")
         except Exception as exc:  # noqa: BLE001
-            QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao carregar Projeto 2:\n{exc}")
+            self._notify(f"Falha ao carregar Projeto 2: {exc}", "error")
 
     def save_project2(self) -> None:
         try:
             self.logic.save_project2()
-            QtWidgets.QMessageBox.information(self, "Sucesso", "Projeto 2 atualizado com sucesso!")
+            self._notify("Projeto 2 atualizado com sucesso!", "success")
         except Exception as exc:  # noqa: BLE001
-            QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao salvar Projeto 2:\n{exc}")
+            self._notify(f"Falha ao salvar Projeto 2: {exc}", "error")
 
     def save_project2_as(self) -> None:
         default_dir = None
@@ -188,70 +209,66 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
             path = f"{path}.cpmproject"
         try:
             self.logic.save_project2_as(path)
-            QtWidgets.QMessageBox.information(self, "Sucesso", "Projeto 2 salvo no novo local!")
+            self._notify("Projeto 2 salvo no novo local!", "success")
         except Exception as exc:  # noqa: BLE001
-            QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao salvar Projeto 2:\n{exc}")
+            self._notify(f"Falha ao salvar Projeto 2: {exc}", "error")
 
     def copy_element(self) -> None:
         selected = self.tree1.currentItem()
         if not selected:
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Selecione algo em JSON 1")
+            self._notify("Selecione algo em JSON 1", "warning")
             return
         path = self._item_path(selected)
         self.logic.copy_from_json1(path)
-        QtWidgets.QMessageBox.information(self, "Clipboard", "Elemento copiado")
+        self._notify("Elemento copiado do JSON 1", "info")
 
     def move_element(self) -> None:
         selected = self.tree2.currentItem()
         if not selected:
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Selecione algo em JSON 2 para mover")
+            self._notify("Selecione algo em JSON 2 para mover", "warning")
             return
         path = self._item_path(selected)
         self.logic.move_from_json2(path)
-        QtWidgets.QMessageBox.information(
-            self,
-            "Clipboard",
-            "Elemento marcado para mover. Agora selecione destino e clique Colar",
-        )
+        self._notify("Elemento marcado para mover. Agora selecione destino e clique Colar", "info")
 
     def paste_element(self) -> None:
         if self.logic.clipboard is None:
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Clipboard vazio")
+            self._notify("Clipboard vazio", "warning")
             return
         selected = self.tree2.currentItem()
         if not selected:
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Selecione destino em JSON 2")
+            self._notify("Selecione destino em JSON 2", "warning")
             return
         dest_path = self._item_path(selected)
         try:
             self.logic.paste_to_json2(dest_path)
             self._build_tree(self.tree2, self.logic.json2)
-            QtWidgets.QMessageBox.information(self, "Sucesso", "Elemento colado")
+            self._notify("Elemento colado", "success")
         except Exception as exc:  # noqa: BLE001
-            QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao colar elemento:\n{exc}")
+            self._notify(f"Falha ao colar elemento: {exc}", "error")
 
     def shift_uv(self, du: int, dv: int) -> bool:
         selected = self.tree2.currentItem()
         if not selected:
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Selecione elemento em JSON 2 para ajustar UV")
+            self._notify("Selecione elemento em JSON 2 para ajustar UV", "warning")
             return False
         element = self.logic.get_by_path(self.logic.json2, self._item_path(selected))
         self.logic.adjust_uv(element, du, dv)
         self._build_tree(self.tree2, self.logic.json2)
-        QtWidgets.QMessageBox.information(self, "Sucesso", f"UV ajustado em dU={du}, dV={dv}")
+        self._notify(f"UV ajustado em dU={du}, dV={dv}", "success")
         return True
 
     def perform_search(self, query: str, scope: str) -> None:
         query = query.strip().lower()
         if not query:
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Digite algo para buscar")
+            self._notify("Digite algo para buscar", "warning")
             return
         tree = self.tree1 if scope == "JSON 1" else self.tree2
         self.search_results = [
             item for item in self._walk_items(tree) if query in item.text(0).lower()
         ]
         if not self.search_results:
-            QtWidgets.QMessageBox.information(self, "Busca", "Nada encontrado")
+            self._notify("Nada encontrado", "info")
             return
         self.search_index = 0
         self.last_search_scope = scope
@@ -259,7 +276,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
 
     def next_search(self) -> None:
         if not self.search_results:
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Nenhum resultado")
+            self._notify("Nenhum resultado", "warning")
             return
         tree = self.tree1 if self.last_search_scope == "JSON 1" else self.tree2
         self.search_index = (self.search_index + 1) % len(self.search_results)
@@ -360,11 +377,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
             ancestor = ancestor.parent()
         tree.setCurrentItem(item)
         tree.scrollToItem(item)
-        QtWidgets.QMessageBox.information(
-            self,
-            "Busca",
-            f"Resultado {self.search_index + 1} de {len(self.search_results)}",
-        )
+        self._notify(f"Resultado {self.search_index + 1} de {len(self.search_results)}", "info")
 
     def _walk_items(self, tree: QtWidgets.QTreeWidget) -> List[QtWidgets.QTreeWidgetItem]:
         def walk(parent: QtWidgets.QTreeWidgetItem) -> List[QtWidgets.QTreeWidgetItem]:
@@ -382,34 +395,53 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
             result.extend(walk(top))
         return result
 
+    def colorize_hierarchy(self) -> None:
+        for tree in (self.tree1, self.tree2):
+            self._apply_hierarchy_colors(tree)
+        self._notify("Hierarquia colorida", "info")
+
+    def _apply_hierarchy_colors(self, tree: QtWidgets.QTreeWidget) -> None:
+        colors = ["#ffffff", "#33cc33", "#00aaff", "#ffd93d", "#ff66c4", "#ff4d4f", "#aaaaaa"]
+
+        def apply_color(item: QtWidgets.QTreeWidgetItem) -> None:
+            path = self._item_path(item)
+            depth = len(path)
+            color = QtGui.QColor(colors[depth % len(colors)])
+            item.setForeground(0, QtGui.QBrush(color))
+            for i in range(item.childCount()):
+                apply_color(item.child(i))
+
+        for idx in range(tree.topLevelItemCount()):
+            apply_color(tree.topLevelItem(idx))
+
     def copy_animation(self) -> None:
         current = self.anim_list1.currentItem()
         if not current:
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Selecione uma animação em Projeto 1")
+            self._notify("Selecione uma animação em Projeto 1", "warning")
             return
         path = current.data(QtCore.Qt.ItemDataRole.UserRole)
         try:
             self.logic.copy_animation_from_project1(path)
-            QtWidgets.QMessageBox.information(self, "Sucesso", "Animação copiada!")
+            self._notify("Animação copiada!", "success")
         except Exception as exc:  # noqa: BLE001
-            QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao copiar animação:\n{exc}")
+            self._notify(f"Falha ao copiar animação: {exc}", "error")
 
     def paste_animation(self) -> None:
         if self.logic.animation_clipboard is None:
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Nenhuma animação copiada")
+            self._notify("Nenhuma animação copiada", "warning")
             return
         if not self.logic.project2_archive:
-            QtWidgets.QMessageBox.warning(self, "Aviso", "Carregue o Projeto 2 primeiro")
+            self._notify("Carregue o Projeto 2 primeiro", "warning")
             return
         mapping_dialog = AnimationMappingDialog(self, self.logic)
         if mapping_dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             mapping = mapping_dialog.get_mapping()
             try:
                 self.logic.paste_animation_to_project2(mapping)
-                QtWidgets.QMessageBox.information(self, "Sucesso", "Animação colada no Projeto 2")
+                self._notify("Animação colada no Projeto 2", "success")
                 self._refresh_animation_lists()
             except Exception as exc:  # noqa: BLE001
-                QtWidgets.QMessageBox.critical(self, "Erro", f"Falha ao colar animação:\n{exc}")
+                self._notify(f"Falha ao colar animação: {exc}", "error")
 
     def _refresh_animation_lists(self) -> None:
         self.anim_list1.clear()
@@ -472,7 +504,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow):
 
     def open_movement_dialog(self) -> None:
         if not self.logic.json2:
-            QtWidgets.QMessageBox.warning(self, "Eita", "Carrega o Projeto 2 ai antes, por favorzinho :)")
+            self._notify("Carrega o Projeto 2 ai antes, por favorzinho :)", "warning")
             return
         dialog = MovementDialog(self, self.logic)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
@@ -571,7 +603,7 @@ class MovementDialog(QtWidgets.QDialog):
         layout = QtWidgets.QVBoxLayout(self)
         options = self.logic.list_elements()
         if not options:
-            QtWidgets.QMessageBox.warning(self, "Xiii", "Nenhum elemento achado em JSON 2 :(")
+            self._notify_parent("Nenhum elemento achado em JSON 2 :(", "warning")
             self.reject()
             return
 
@@ -617,22 +649,20 @@ class MovementDialog(QtWidgets.QDialog):
         for key, combo in self.combos.items():
             data = combo.currentData()
             if data is None:
-                QtWidgets.QMessageBox.warning(self, "Ops", f"Escolhe algo para {key}, vai lá :)")
+                self._notify_parent(f"Escolhe algo para {key}, vai lá :)", "warning")
                 return
             selection[key] = list(data)
         if len({tuple(path) for path in selection.values()}) != len(selection):
-            QtWidgets.QMessageBox.warning(
-                self, "Aviso", "Nao pode selecionar o mesmo elemento em duas opcoes nao :("
-            )
+            self._notify_parent("Nao pode selecionar o mesmo elemento em duas opcoes nao :(", "warning")
             return
         try:
             debug_hook = self._build_debug_hook() if self.debug_checkbox.isChecked() else None
             skin_x128 = self.skin_checkbox.isChecked()
             self.logic.apply_movement_tool(selection, debug_hook=debug_hook, skin_x128=skin_x128)
-            QtWidgets.QMessageBox.information(self, "OBaaaaa", "Deu bom :)")
+            self._notify_parent("OBaaaaa - Deu bom :)", "success")
             self.accept()
         except Exception as exc:  # noqa: BLE001
-            QtWidgets.QMessageBox.critical(self, "AAAAAAAAAAAAAAAAAAAA", f"Deu esse erro aqui:\n{exc}")
+            self._notify_parent(f"Deu esse erro aqui: {exc}", "error")
 
     def _build_debug_hook(self) -> Callable[[str], None]:
         parent_window = self.parent()
@@ -645,12 +675,12 @@ class MovementDialog(QtWidgets.QDialog):
 
         def _hook(step: str) -> None:
             label = step_labels.get(step, step)
-            QtWidgets.QMessageBox.information(self, "DEBUG", f"{label}\nChama o Salvar como... ai!")
+            self._notify_parent(f"{label} - Chama o Salvar como... ai!", "info")
             if isinstance(parent_window, JSONMergerWindow):
                 try:
                     parent_window.save_project2_as()
                 except Exception as exc:  # noqa: BLE001
-                    QtWidgets.QMessageBox.warning(self, "DEBUG", f"Salvar como falhou:\n{exc}")
+                    self._notify_parent(f"Salvar como falhou: {exc}", "warning")
 
         return _hook
 
@@ -674,6 +704,13 @@ class MovementDialog(QtWidgets.QDialog):
                     combo.setCurrentIndex(index)
                     break
 
+    def _notify_parent(self, message: str, level: str = "info") -> None:
+        parent = self.parent()
+        if isinstance(parent, StatusMixin):
+            parent._notify(message, level)
+        elif parent and hasattr(parent, "_notify"):
+            parent._notify(message, level)
+
 
 class AnimationMappingDialog(QtWidgets.QDialog):
     def __init__(self, parent: JSONMergerWindow, logic: JSONMergerLogic) -> None:
@@ -685,7 +722,8 @@ class AnimationMappingDialog(QtWidgets.QDialog):
     def _build_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)
         if self.logic.animation_clipboard is None:
-            QtWidgets.QMessageBox.critical(self, "Erro", "Nenhuma animação para mapear.")
+            if hasattr(self.parent(), "_notify"):
+                self.parent()._notify("Nenhuma animação para mapear.", "error")
             self.reject()
             return
         source_ids = self.logic.extract_store_ids(self.logic.animation_clipboard)
@@ -696,16 +734,21 @@ class AnimationMappingDialog(QtWidgets.QDialog):
         grid = QtWidgets.QGridLayout()
         self.combos: dict[int, QtWidgets.QComboBox] = {}
         rows_per_col = 8
+        short = lambda val: str(val)[-6:] if isinstance(val, int) and len(str(val)) > 6 else str(val)
         for idx, sid in enumerate(source_ids):
             combo = QtWidgets.QComboBox()
-            combo.addItem(f"Manter ({sid})", userData=sid)
+            combo.setMinimumWidth(180)
+            combo.view().setMinimumWidth(200)
+            combo.addItem(f"Manter ({short(sid)})", userData=sid)
             for tid in target_ids:
                 text = target_names.get(tid, str(tid))
-                combo.addItem(f"{text} ({tid})", userData=tid)
+                combo.addItem(f"{text} ({short(tid)})", userData=tid)
             row = idx % rows_per_col
             col = idx // rows_per_col
-            label_text = source_names.get(sid, f"storeID {sid}")
-            grid.addWidget(QtWidgets.QLabel(label_text), row, col * 2)
+            label_text = source_names.get(sid, f"storeID {short(sid)}")
+            label_widget = QtWidgets.QLabel(label_text)
+            label_widget.setToolTip(str(sid))
+            grid.addWidget(label_widget, row, col * 2)
             grid.addWidget(combo, row, col * 2 + 1)
             self.combos[sid] = combo
         layout.addLayout(grid)
@@ -727,6 +770,7 @@ class AnimationMappingDialog(QtWidgets.QDialog):
             if isinstance(val, int) and val != sid:
                 mapping[sid] = val
         return mapping
+
 
 def run_app() -> None:
     app = QtWidgets.QApplication(sys.argv)
