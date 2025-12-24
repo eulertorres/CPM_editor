@@ -77,6 +77,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.show_only_elements = True
         self.dark_mode_enabled = False
         self.show_element_colors = False
+        self.current_animation: tuple[int, str, str] | None = None
         self._setup_ui()
         self.statusBar().showMessage("Pronto")
 
@@ -206,6 +207,9 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         anim_left_layout = QtWidgets.QVBoxLayout(anim_left)
         anim_left_layout.addWidget(QtWidgets.QLabel("Animações Projeto 1"))
         self.anim_list1 = QtWidgets.QListWidget()
+        self.anim_list1.currentItemChanged.connect(
+            lambda cur, prev: self._on_animation_selected(1, cur)
+        )
         anim_left_layout.addWidget(self.anim_list1)
         anim_splitter.addWidget(anim_left)
 
@@ -213,11 +217,52 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         anim_right_layout = QtWidgets.QVBoxLayout(anim_right)
         anim_right_layout.addWidget(QtWidgets.QLabel("Animações Projeto 2"))
         self.anim_list2 = QtWidgets.QListWidget()
+        self.anim_list2.currentItemChanged.connect(
+            lambda cur, prev: self._on_animation_selected(2, cur)
+        )
         anim_right_layout.addWidget(self.anim_list2)
         anim_splitter.addWidget(anim_right)
 
         anim_splitter.setStretchFactor(0, 1)
         anim_splitter.setStretchFactor(1, 1)
+
+        timeline_box = QtWidgets.QGroupBox("Timeline")
+        timeline_layout = QtWidgets.QVBoxLayout(timeline_box)
+        self.timeline_header = QtWidgets.QLabel("Nenhuma animação selecionada")
+        timeline_layout.addWidget(self.timeline_header)
+
+        controls = QtWidgets.QHBoxLayout()
+        self.btn_move_left = QtWidgets.QPushButton("Mover ←")
+        self.btn_move_left.clicked.connect(lambda: self._move_frame(-1))
+        controls.addWidget(self.btn_move_left)
+
+        self.btn_move_right = QtWidgets.QPushButton("Mover →")
+        self.btn_move_right.clicked.connect(lambda: self._move_frame(1))
+        controls.addWidget(self.btn_move_right)
+
+        self.btn_add_clean = QtWidgets.QPushButton("Adicionar frame limpo")
+        self.btn_add_clean.clicked.connect(self._add_clean_frame)
+        controls.addWidget(self.btn_add_clean)
+
+        self.btn_duplicate = QtWidgets.QPushButton("Duplicar frame")
+        self.btn_duplicate.clicked.connect(self._duplicate_frame)
+        controls.addWidget(self.btn_duplicate)
+
+        self.btn_delete = QtWidgets.QPushButton("Excluir frame")
+        self.btn_delete.clicked.connect(self._delete_frame)
+        controls.addWidget(self.btn_delete)
+
+        controls.addStretch(1)
+        timeline_layout.addLayout(controls)
+
+        self.timeline_list = QtWidgets.QListWidget()
+        self.timeline_list.setFlow(QtWidgets.QListView.Flow.LeftToRight)
+        self.timeline_list.setWrapping(True)
+        self.timeline_list.setResizeMode(QtWidgets.QListView.ResizeMode.Adjust)
+        self.timeline_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        timeline_layout.addWidget(self.timeline_list)
+
+        anim_layout.addWidget(timeline_box)
 
         self.tabs.addTab(animations_tab, "Animações")
 
@@ -615,6 +660,124 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             list_item = QtWidgets.QListWidgetItem(item["label"])
             list_item.setData(QtCore.Qt.ItemDataRole.UserRole, item["path"])
             self.anim_list2.addItem(list_item)
+
+        self._clear_timeline()
+
+    def _clear_timeline(self) -> None:
+        self.timeline_list.clear()
+        self.timeline_header.setText("Nenhuma animação selecionada")
+        self.current_animation = None
+
+    def _on_animation_selected(
+        self, project: int, item: QtWidgets.QListWidgetItem | None
+    ) -> None:
+        if item is None:
+            self._clear_timeline()
+            return
+        other_list = self.anim_list2 if project == 1 else self.anim_list1
+        other_list.blockSignals(True)
+        other_list.clearSelection()
+        other_list.blockSignals(False)
+        path = item.data(QtCore.Qt.ItemDataRole.UserRole)
+        label = item.text()
+        if not isinstance(path, str):
+            self._clear_timeline()
+            return
+        self.current_animation = (project, path, label)
+        self._load_timeline()
+
+    def _load_timeline(self) -> None:
+        self.timeline_list.clear()
+        if not self.current_animation:
+            self.timeline_header.setText("Nenhuma animação selecionada")
+            return
+        project, path, label = self.current_animation
+        try:
+            anim = self.logic.load_animation(project, path)
+            frames = anim.get("frames", [])
+            if not isinstance(frames, list):
+                raise ValueError("Animação sem frames")
+            for idx, frame in enumerate(frames):
+                components = frame.get("components", []) if isinstance(frame, dict) else []
+                comp_count = len(components) if isinstance(components, list) else 0
+                item = QtWidgets.QListWidgetItem(f"Frame {idx}\n{comp_count} comps")
+                item.setData(QtCore.Qt.ItemDataRole.UserRole, idx)
+                self.timeline_list.addItem(item)
+            self.timeline_header.setText(
+                f"{label} — {len(frames)} frame(s) (Projeto {project})"
+            )
+            if self.timeline_list.count() > 0:
+                self.timeline_list.setCurrentRow(0)
+        except Exception as exc:  # noqa: BLE001
+            self._notify(f"Falha ao carregar timeline: {exc}", "error")
+            self._clear_timeline()
+
+    def _current_frame_index(self) -> int | None:
+        row = self.timeline_list.currentRow()
+        if row < 0:
+            return None
+        return row
+
+    def _require_animation(self) -> tuple[int, str, str]:
+        if not self.current_animation:
+            raise ValueError("Selecione uma animação primeiro")
+        return self.current_animation
+
+    def _move_frame(self, delta: int) -> None:
+        try:
+            project, path, _ = self._require_animation()
+            index = self._current_frame_index()
+            if index is None:
+                raise ValueError("Selecione um frame para mover")
+            target = index + delta
+            if target < 0 or target >= self.timeline_list.count():
+                raise ValueError("Não é possível mover além dos limites")
+            self.logic.move_frame(project, path, index, target)
+            self._load_timeline()
+            self.timeline_list.setCurrentRow(target)
+            self._notify("Frame movido", "success")
+        except Exception as exc:  # noqa: BLE001
+            self._notify(str(exc), "error")
+
+    def _delete_frame(self) -> None:
+        try:
+            project, path, _ = self._require_animation()
+            index = self._current_frame_index()
+            if index is None:
+                raise ValueError("Selecione um frame para excluir")
+            self.logic.delete_frame(project, path, index)
+            self._load_timeline()
+            new_index = min(index, self.timeline_list.count() - 1)
+            if new_index >= 0:
+                self.timeline_list.setCurrentRow(new_index)
+            self._notify("Frame excluído", "success")
+        except Exception as exc:  # noqa: BLE001
+            self._notify(str(exc), "error")
+
+    def _duplicate_frame(self) -> None:
+        try:
+            project, path, _ = self._require_animation()
+            index = self._current_frame_index()
+            if index is None:
+                raise ValueError("Selecione um frame para duplicar")
+            self.logic.duplicate_frame(project, path, index)
+            self._load_timeline()
+            self.timeline_list.setCurrentRow(index + 1)
+            self._notify("Frame duplicado", "success")
+        except Exception as exc:  # noqa: BLE001
+            self._notify(str(exc), "error")
+
+    def _add_clean_frame(self) -> None:
+        try:
+            project, path, _ = self._require_animation()
+            index = self._current_frame_index()
+            insert_at = (index + 1) if index is not None else 0
+            self.logic.insert_clean_frame(project, path, insert_at)
+            self._load_timeline()
+            self.timeline_list.setCurrentRow(insert_at)
+            self._notify("Frame limpo inserido", "success")
+        except Exception as exc:  # noqa: BLE001
+            self._notify(str(exc), "error")
 
     @staticmethod
     def _item_path(item: QtWidgets.QTreeWidgetItem) -> List[int | str]:

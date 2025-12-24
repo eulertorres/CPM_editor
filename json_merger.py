@@ -352,6 +352,41 @@ class JSONMergerLogic:
         raw = self._decode_bytes(archive[path])
         return json.loads(raw)
 
+    def move_frame(self, project: int, path: str, from_idx: int, to_idx: int) -> list[dict[str, Any]]:
+        anim, frames = self._animation_with_frames(project, path)
+        if from_idx < 0 or from_idx >= len(frames):
+            raise ValueError("Índice de origem inválido")
+        if to_idx < 0 or to_idx >= len(frames):
+            raise ValueError("Índice de destino inválido")
+        frame = frames.pop(from_idx)
+        frames.insert(to_idx, frame)
+        self._write_animation(project, path, anim)
+        return frames
+
+    def delete_frame(self, project: int, path: str, index: int) -> list[dict[str, Any]]:
+        anim, frames = self._animation_with_frames(project, path)
+        if index < 0 or index >= len(frames):
+            raise ValueError("Índice inválido para excluir")
+        frames.pop(index)
+        self._write_animation(project, path, anim)
+        return frames
+
+    def duplicate_frame(self, project: int, path: str, index: int) -> list[dict[str, Any]]:
+        anim, frames = self._animation_with_frames(project, path)
+        if index < 0 or index >= len(frames):
+            raise ValueError("Índice inválido para duplicar")
+        frames.insert(index + 1, copy.deepcopy(frames[index]))
+        self._write_animation(project, path, anim)
+        return frames
+
+    def insert_clean_frame(self, project: int, path: str, index: int) -> list[dict[str, Any]]:
+        anim, frames = self._animation_with_frames(project, path)
+        base_components = self._base_components_from_model(project)
+        insert_at = min(max(index, 0), len(frames))
+        frames.insert(insert_at, {"components": base_components})
+        self._write_animation(project, path, anim)
+        return frames
+
     def interpolate_frames(
         self, project: int, path: str, start_idx: int, end_idx: int, insert_count: int, new_name: str | None
     ) -> None:
@@ -769,6 +804,33 @@ class JSONMergerLogic:
                 if isinstance(sid, int):
                     result[sid] = comp
         return result
+
+    def _animation_with_frames(self, project: int, path: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        anim = self.load_animation(project, path)
+        frames = anim.get("frames")
+        if not isinstance(frames, list):
+            raise ValueError("Animação sem frames")
+        return anim, frames
+
+    def _write_animation(self, project: int, path: str, anim: dict[str, Any]) -> None:
+        archive = self.project1_archive if project == 1 else self.project2_archive
+        archive[path] = json.dumps(anim, indent=2, ensure_ascii=False).encode("utf-8")
+
+    def _base_components_from_model(self, project: int) -> list[dict[str, Any]]:
+        model = self.json1 if project == 1 else self.json2
+        if not model:
+            raise ValueError("Carregue o projeto correspondente antes")
+        mapping = self._storeid_node_map(model)
+        components: list[dict[str, Any]] = []
+        for store_id in sorted(mapping):
+            first = mapping[store_id][0]
+            comp: dict[str, Any] = {"storeID": store_id}
+            if "pos" in first:
+                comp["pos"] = copy.deepcopy(first["pos"])
+            if "rotation" in first:
+                comp["rotation"] = copy.deepcopy(first["rotation"])
+            components.append(comp)
+        return components
 
     @staticmethod
     def _apply_transform_to_node(node: dict[str, Any], comp: dict[str, Any]) -> None:
