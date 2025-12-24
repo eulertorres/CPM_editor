@@ -375,15 +375,14 @@ class JSONMergerLogic:
             t = step / (insert_count + 1)
             comps: list[dict[str, Any]] = []
             for sid in union_ids:
-                src = start_map.get(sid) or end_map.get(sid)
-                dst = end_map.get(sid) or start_map.get(sid)
+                src = start_map.get(sid) or {}
+                dst = end_map.get(sid) or {}
                 if not isinstance(src, dict) or not isinstance(dst, dict):
                     continue
-                comp = copy.deepcopy(src)
-                if "pos" in src and "pos" in dst:
-                    comp["pos"] = self._lerp_vectors(src.get("pos"), dst.get("pos"), t)
-                if "rotation" in src and "rotation" in dst:
-                    comp["rotation"] = self._lerp_vectors(src.get("rotation"), dst.get("rotation"), t)
+                comp = copy.deepcopy(src if src else dst)
+                comp["storeID"] = sid
+                comp["pos"] = self._lerp_vectors(src.get("pos"), dst.get("pos"), t)
+                comp["rotation"] = self._lerp_vectors(src.get("rotation"), dst.get("rotation"), t)
                 comps.append(comp)
             new_frames.append({"components": comps})
 

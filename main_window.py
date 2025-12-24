@@ -26,11 +26,14 @@ class StatusMixin:
 
 
 class OptionsDialog(QtWidgets.QDialog):
-    def __init__(self, parent: QtWidgets.QWidget, elements_only: bool, dark_mode: bool) -> None:
+    def __init__(
+        self, parent: QtWidgets.QWidget, elements_only: bool, dark_mode: bool, show_colors: bool
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Opções")
         self.elements_only = elements_only
         self.dark_mode = dark_mode
+        self.show_colors = show_colors
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -43,6 +46,10 @@ class OptionsDialog(QtWidgets.QDialog):
         self.chk_dark.setChecked(self.dark_mode)
         layout.addWidget(self.chk_dark)
 
+        self.chk_colors = QtWidgets.QCheckBox("Colorir elementos pelo config.json")
+        self.chk_colors.setChecked(self.show_colors)
+        layout.addWidget(self.chk_colors)
+
         buttons = QtWidgets.QHBoxLayout()
         ok_btn = QtWidgets.QPushButton("OK")
         ok_btn.clicked.connect(self.accept)
@@ -53,7 +60,11 @@ class OptionsDialog(QtWidgets.QDialog):
         layout.addLayout(buttons)
 
     def values(self) -> dict[str, bool]:
-        return {"elements_only": self.chk_elements.isChecked(), "dark_mode": self.chk_dark.isChecked()}
+        return {
+            "elements_only": self.chk_elements.isChecked(),
+            "dark_mode": self.chk_dark.isChecked(),
+            "show_colors": self.chk_colors.isChecked(),
+        }
 
 
 class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
@@ -65,6 +76,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.last_search_scope: str | None = None
         self.show_only_elements = True
         self.dark_mode_enabled = False
+        self.show_element_colors = False
         self._setup_ui()
         self.statusBar().showMessage("Pronto")
 
@@ -377,13 +389,19 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             app.setStyleSheet("")
 
     def open_options_dialog(self) -> None:
-        dialog = OptionsDialog(self, self.show_only_elements, self.dark_mode_enabled)
+        dialog = OptionsDialog(
+            self, self.show_only_elements, self.dark_mode_enabled, self.show_element_colors
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             opts = dialog.values()
             if opts["dark_mode"] != self.dark_mode_enabled:
                 self._toggle_dark_mode(opts["dark_mode"])
             if opts["elements_only"] != self.show_only_elements:
                 self._toggle_elements_only(opts["elements_only"])
+            if opts["show_colors"] != self.show_element_colors:
+                self.show_element_colors = opts["show_colors"]
+                self._build_tree(self.tree1, self.logic.json1)
+                self._build_tree(self.tree2, self.logic.json2)
 
     def _build_tree(self, tree: QtWidgets.QTreeWidget, data: object) -> None:
         tree.clear()
@@ -397,8 +415,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             self._insert_items(tree, root, data, [])
         tree.expandItem(root)
 
-    @staticmethod
-    def _color_from_namecolor(element: dict[str, object]) -> QtGui.QColor:
+    def _color_from_namecolor(self, element: dict[str, object]) -> QtGui.QColor:
         value = element.get("nameColor") if isinstance(element, dict) else None
         color_val: int | None = None
         if isinstance(value, int):
@@ -412,6 +429,11 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             return QtGui.QColor(f"#{color_val:06x}")
         return QtGui.QColor("#1b7fb3")
 
+    def _label_color(self, element: dict[str, object]) -> QtGui.QColor:
+        if self.show_element_colors:
+            return self._color_from_namecolor(element)
+        return QtGui.QColor("#7a7a7a")
+
     def _insert_items(
         self,
         tree: QtWidgets.QTreeWidget,
@@ -423,7 +445,8 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             for key, val in value.items():
                 item = QtWidgets.QTreeWidgetItem([str(key)])
                 item.setData(0, QtCore.Qt.ItemDataRole.UserRole, path + [key])
-                item.setForeground(0, QtGui.QBrush(QtGui.QColor("#7a7a7a")))
+                color = self._label_color(val) if isinstance(val, dict) else QtGui.QColor("#7a7a7a")
+                item.setForeground(0, QtGui.QBrush(color))
                 parent.addChild(item)
                 self._insert_items(tree, item, val, path + [key])
         elif isinstance(value, list):
@@ -435,7 +458,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
                 item = QtWidgets.QTreeWidgetItem([label])
                 item.setData(0, QtCore.Qt.ItemDataRole.UserRole, path + [idx])
                 if isinstance(element, dict):
-                    item.setForeground(0, QtGui.QBrush(self._color_from_namecolor(element)))
+                    item.setForeground(0, QtGui.QBrush(self._label_color(element)))
                     font = item.font(0)
                     font.setBold(True)
                     item.setFont(0, font)
@@ -466,7 +489,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
                         label = element.get("id") or element.get("name") or f"[{idx}]"
                         item = QtWidgets.QTreeWidgetItem([label])
                         item.setData(0, QtCore.Qt.ItemDataRole.UserRole, path + [key, idx])
-                        item.setForeground(0, QtGui.QBrush(self._color_from_namecolor(element)))
+                        item.setForeground(0, QtGui.QBrush(self._label_color(element)))
                         font = item.font(0)
                         font.setBold(True)
                         item.setFont(0, font)
