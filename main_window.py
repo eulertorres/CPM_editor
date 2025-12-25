@@ -260,7 +260,29 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.timeline_list.setWrapping(True)
         self.timeline_list.setResizeMode(QtWidgets.QListView.ResizeMode.Adjust)
         self.timeline_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        self.timeline_list.currentItemChanged.connect(self._update_frame_details)
         timeline_layout.addWidget(self.timeline_list)
+
+        details_box = QtWidgets.QGroupBox("Elementos modificados no frame")
+        details_layout = QtWidgets.QVBoxLayout(details_box)
+        self.frame_elements_label = QtWidgets.QLabel("Selecione um frame para ver os elementos")
+        details_layout.addWidget(self.frame_elements_label)
+        self.frame_elements_list = QtWidgets.QListWidget()
+        self.frame_elements_list.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
+        )
+        details_layout.addWidget(self.frame_elements_list)
+
+        copy_row = QtWidgets.QHBoxLayout()
+        self.btn_copy_transform = QtWidgets.QPushButton(
+            "Copiar pos/rot + filhos para outro frame"
+        )
+        self.btn_copy_transform.clicked.connect(self._copy_element_transform)
+        copy_row.addWidget(self.btn_copy_transform)
+        copy_row.addStretch(1)
+        details_layout.addLayout(copy_row)
+
+        timeline_layout.addWidget(details_box)
 
         anim_layout.addWidget(timeline_box)
 
@@ -667,6 +689,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.timeline_list.clear()
         self.timeline_header.setText("Nenhuma animação selecionada")
         self.current_animation = None
+        self._clear_frame_elements()
 
     def _on_animation_selected(
         self, project: int, item: QtWidgets.QListWidgetItem | None
@@ -708,15 +731,79 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             )
             if self.timeline_list.count() > 0:
                 self.timeline_list.setCurrentRow(0)
+            else:
+                self._clear_frame_elements()
         except Exception as exc:  # noqa: BLE001
             self._notify(f"Falha ao carregar timeline: {exc}", "error")
             self._clear_timeline()
+        self._update_frame_details()
 
     def _current_frame_index(self) -> int | None:
         row = self.timeline_list.currentRow()
         if row < 0:
             return None
         return row
+
+    def _clear_frame_elements(self) -> None:
+        self.frame_elements_list.clear()
+        self.frame_elements_label.setText("Selecione um frame para ver os elementos")
+
+    def _update_frame_details(
+        self, current: QtWidgets.QListWidgetItem | None = None, previous: QtWidgets.QListWidgetItem | None = None
+    ) -> None:
+        del previous
+        if current is None or not self.current_animation:
+            self._clear_frame_elements()
+            return
+        project, path, _ = self.current_animation
+        try:
+            index = self._current_frame_index()
+            if index is None:
+                self._clear_frame_elements()
+                return
+            elements = self.logic.frame_component_hierarchy(project, path, index)
+            self.frame_elements_list.clear()
+            for element in elements:
+                label = ("    " * element.get("depth", 0)) + element.get("name", "")
+                item = QtWidgets.QListWidgetItem(label)
+                item.setData(QtCore.Qt.ItemDataRole.UserRole, element.get("storeID"))
+                self.frame_elements_list.addItem(item)
+            count = len(elements)
+            self.frame_elements_label.setText(
+                f"{count} elemento(s) com pos/rot no frame {index}"
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._notify(str(exc), "error")
+            self._clear_frame_elements()
+
+    def _copy_element_transform(self) -> None:
+        try:
+            project, path, _ = self._require_animation()
+            src_frame = self._current_frame_index()
+            if src_frame is None:
+                raise ValueError("Selecione um frame de origem na timeline")
+            selected_element = self.frame_elements_list.currentItem()
+            if selected_element is None:
+                raise ValueError("Selecione um elemento na lista do frame")
+            store_id = selected_element.data(QtCore.Qt.ItemDataRole.UserRole)
+            if not isinstance(store_id, int):
+                raise ValueError("Elemento sem storeID válido")
+            max_frame = self.timeline_list.count() - 1
+            target_frame, ok = QtWidgets.QInputDialog.getInt(
+                self,
+                "Copiar para frame",
+                "Número do frame de destino (0-index)",
+                value=src_frame,
+                min=0,
+                max=max_frame if max_frame >= 0 else 0,
+            )
+            if not ok:
+                return
+            self.logic.copy_element_transform(project, path, src_frame, target_frame, store_id)
+            self._notify("Transformações copiadas para o frame de destino", "success")
+            self.timeline_list.setCurrentRow(target_frame)
+        except Exception as exc:  # noqa: BLE001
+            self._notify(str(exc), "error")
 
     def _require_animation(self) -> tuple[int, str, str]:
         if not self.current_animation:

@@ -387,6 +387,83 @@ class JSONMergerLogic:
         self._write_animation(project, path, anim)
         return frames
 
+    def frame_component_hierarchy(
+        self, project: int, path: str, frame_index: int
+    ) -> list[dict[str, Any]]:
+        anim = self.load_animation(project, path)
+        frames = anim.get("frames")
+        if not isinstance(frames, list) or frame_index < 0 or frame_index >= len(frames):
+            raise ValueError("Frame inválido")
+        frame = frames[frame_index]
+        comps = frame.get("components", []) if isinstance(frame, dict) else []
+        if not isinstance(comps, list):
+            raise ValueError("Frame sem componentes")
+        store_ids = {c.get("storeID") for c in comps if isinstance(c, dict) and isinstance(c.get("storeID"), int)}
+        if not store_ids:
+            return []
+        model = self.json1 if project == 1 else self.json2
+        name_map = self.storeid_name_map(project)
+
+        collected: list[dict[str, Any]] = []
+
+        def walk(node: Any, depth: int) -> None:
+            if isinstance(node, dict):
+                sid = node.get("storeID")
+                if isinstance(sid, int) and sid in store_ids:
+                    label = name_map.get(sid) or node.get("name") or node.get("id") or f"storeID {sid}"
+                    collected.append({"storeID": sid, "name": str(label), "depth": depth})
+                for key in ("children", "elements"):
+                    val = node.get(key)
+                    if isinstance(val, list):
+                        for child in val:
+                            walk(child, depth + 1)
+            elif isinstance(node, list):
+                for item in node:
+                    walk(item, depth)
+
+        walk(model, 0)
+        remaining = [sid for sid in store_ids if sid not in {c["storeID"] for c in collected}]
+        for sid in remaining:
+            label = name_map.get(sid, f"storeID {sid}")
+            collected.append({"storeID": sid, "name": str(label), "depth": 0})
+        return collected
+
+    def copy_element_transform(
+        self, project: int, path: str, source_frame: int, target_frame: int, store_id: int
+    ) -> None:
+        anim, frames = self._animation_with_frames(project, path)
+        if source_frame < 0 or source_frame >= len(frames):
+            raise ValueError("Frame de origem inválido")
+        if target_frame < 0 or target_frame >= len(frames):
+            raise ValueError("Frame de destino inválido")
+        src_frame = frames[source_frame]
+        tgt_frame = frames[target_frame]
+        src_map = self._components_by_storeid(src_frame)
+        tgt_comps = tgt_frame.get("components") if isinstance(tgt_frame, dict) else None
+        if not isinstance(tgt_comps, list):
+            raise ValueError("Frame de destino sem componentes")
+        tgt_map = self._components_by_storeid(tgt_frame)
+        descendant_ids = self._descendant_storeids(project, store_id)
+        ids_to_copy = [store_id] + [sid for sid in descendant_ids if sid not in {store_id}]
+        updated = 0
+        for sid in ids_to_copy:
+            source_comp = src_map.get(sid)
+            if not source_comp:
+                continue
+            target_comp = tgt_map.get(sid)
+            if target_comp is None:
+                target_comp = {"storeID": sid}
+                tgt_comps.append(target_comp)
+                tgt_map[sid] = target_comp
+            if "pos" in source_comp:
+                target_comp["pos"] = copy.deepcopy(source_comp["pos"])
+            if "rotation" in source_comp:
+                target_comp["rotation"] = copy.deepcopy(source_comp["rotation"])
+            updated += 1
+        if updated == 0:
+            raise ValueError("Nenhum dado de posição/rotação encontrado para copiar")
+        self._write_animation(project, path, anim)
+
     def interpolate_frames(
         self, project: int, path: str, start_idx: int, end_idx: int, insert_count: int, new_name: str | None
     ) -> None:
@@ -793,6 +870,32 @@ class JSONMergerLogic:
         return result
 
     @staticmethod
+    def _storeid_children_map(node: Any) -> dict[int, list[int]]:
+        mapping: dict[int, list[int]] = {}
+
+        def walk(current: Any) -> None:
+            if isinstance(current, dict):
+                sid = current.get("storeID")
+                child_ids: list[int] = []
+                for key in ("children", "elements"):
+                    val = current.get(key)
+                    if isinstance(val, list):
+                        for child in val:
+                            if isinstance(child, dict):
+                                child_sid = child.get("storeID")
+                                if isinstance(child_sid, int):
+                                    child_ids.append(child_sid)
+                            walk(child)
+                if isinstance(sid, int):
+                    mapping.setdefault(sid, []).extend(child_ids)
+            elif isinstance(current, list):
+                for item in current:
+                    walk(item)
+
+        walk(node)
+        return mapping
+
+    @staticmethod
     def _components_by_storeid(frame: Any) -> dict[int, dict[str, Any]]:
         result: dict[int, dict[str, Any]] = {}
         comps = frame.get("components") if isinstance(frame, dict) else None
@@ -831,6 +934,22 @@ class JSONMergerLogic:
                 comp["rotation"] = copy.deepcopy(first["rotation"])
             components.append(comp)
         return components
+
+    def _descendant_storeids(self, project: int, store_id: int) -> list[int]:
+        model = self.json1 if project == 1 else self.json2
+        if not model:
+            return []
+        child_map = self._storeid_children_map(model)
+        result: list[int] = []
+
+        def collect(current_id: int) -> None:
+            for child_id in child_map.get(current_id, []):
+                if child_id not in result:
+                    result.append(child_id)
+                    collect(child_id)
+
+        collect(store_id)
+        return result
 
     @staticmethod
     def _apply_transform_to_node(node: dict[str, Any], comp: dict[str, Any]) -> None:
