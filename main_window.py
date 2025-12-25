@@ -763,14 +763,18 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
                 return
             elements = self.logic.frame_component_hierarchy(project, path, index)
             self.frame_elements_list.clear()
+            modified_count = 0
             for element in elements:
                 label = ("    " * element.get("depth", 0)) + element.get("name", "")
                 item = QtWidgets.QListWidgetItem(label)
                 item.setData(QtCore.Qt.ItemDataRole.UserRole, element.get("storeID"))
+                if element.get("modified"):
+                    item.setForeground(QtGui.QBrush(QtGui.QColor("#006400")))
+                    modified_count += 1
                 self.frame_elements_list.addItem(item)
             count = len(elements)
             self.frame_elements_label.setText(
-                f"{count} elemento(s) com pos/rot no frame {index}"
+                f"{modified_count} elemento(s) modificados de {count} no frame {index}"
             )
         except Exception as exc:  # noqa: BLE001
             self._notify(str(exc), "error")

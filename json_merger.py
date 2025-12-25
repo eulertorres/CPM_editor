@@ -399,19 +399,26 @@ class JSONMergerLogic:
         if not isinstance(comps, list):
             raise ValueError("Frame sem componentes")
         store_ids = {c.get("storeID") for c in comps if isinstance(c, dict) and isinstance(c.get("storeID"), int)}
-        if not store_ids:
-            return []
         model = self.json1 if project == 1 else self.json2
         name_map = self.storeid_name_map(project)
 
         collected: list[dict[str, Any]] = []
+        seen_ids: set[int] = set()
 
         def walk(node: Any, depth: int) -> None:
             if isinstance(node, dict):
                 sid = node.get("storeID")
-                if isinstance(sid, int) and sid in store_ids:
+                if isinstance(sid, int):
                     label = name_map.get(sid) or node.get("name") or node.get("id") or f"storeID {sid}"
-                    collected.append({"storeID": sid, "name": str(label), "depth": depth})
+                    collected.append(
+                        {
+                            "storeID": sid,
+                            "name": str(label),
+                            "depth": depth,
+                            "modified": sid in store_ids,
+                        }
+                    )
+                    seen_ids.add(sid)
                 for key in ("children", "elements"):
                     val = node.get(key)
                     if isinstance(val, list):
@@ -422,10 +429,10 @@ class JSONMergerLogic:
                     walk(item, depth)
 
         walk(model, 0)
-        remaining = [sid for sid in store_ids if sid not in {c["storeID"] for c in collected}]
+        remaining = [sid for sid in store_ids if sid not in seen_ids]
         for sid in remaining:
             label = name_map.get(sid, f"storeID {sid}")
-            collected.append({"storeID": sid, "name": str(label), "depth": 0})
+            collected.append({"storeID": sid, "name": str(label), "depth": 0, "modified": True})
         return collected
 
     def copy_element_transform(
