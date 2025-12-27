@@ -231,6 +231,12 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.timeline_header = QtWidgets.QLabel("Nenhuma animação selecionada")
         timeline_layout.addWidget(self.timeline_header)
 
+        timeline_split = QtWidgets.QSplitter()
+        timeline_split.setOrientation(QtCore.Qt.Orientation.Horizontal)
+
+        left_timeline_panel = QtWidgets.QWidget()
+        left_timeline_layout = QtWidgets.QVBoxLayout(left_timeline_panel)
+
         controls = QtWidgets.QHBoxLayout()
         self.btn_move_left = QtWidgets.QPushButton("Mover ←")
         self.btn_move_left.clicked.connect(lambda: self._move_frame(-1))
@@ -253,7 +259,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         controls.addWidget(self.btn_delete)
 
         controls.addStretch(1)
-        timeline_layout.addLayout(controls)
+        left_timeline_layout.addLayout(controls)
 
         self.timeline_list = QtWidgets.QListWidget()
         self.timeline_list.setFlow(QtWidgets.QListView.Flow.LeftToRight)
@@ -261,17 +267,18 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.timeline_list.setResizeMode(QtWidgets.QListView.ResizeMode.Adjust)
         self.timeline_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
         self.timeline_list.currentItemChanged.connect(self._update_frame_details)
-        timeline_layout.addWidget(self.timeline_list)
+        left_timeline_layout.addWidget(self.timeline_list)
 
         details_box = QtWidgets.QGroupBox("Elementos modificados no frame")
         details_layout = QtWidgets.QVBoxLayout(details_box)
         self.frame_elements_label = QtWidgets.QLabel("Selecione um frame para ver os elementos")
         details_layout.addWidget(self.frame_elements_label)
-        self.frame_elements_list = QtWidgets.QListWidget()
-        self.frame_elements_list.setSelectionMode(
+        self.frame_elements_tree = QtWidgets.QTreeWidget()
+        self.frame_elements_tree.setHeaderHidden(True)
+        self.frame_elements_tree.setSelectionMode(
             QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
         )
-        details_layout.addWidget(self.frame_elements_list)
+        details_layout.addWidget(self.frame_elements_tree)
 
         copy_row = QtWidgets.QHBoxLayout()
         self.btn_copy_transform = QtWidgets.QPushButton(
@@ -279,10 +286,20 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         )
         self.btn_copy_transform.clicked.connect(self._copy_element_transform)
         copy_row.addWidget(self.btn_copy_transform)
+
+        self.btn_copy_all_frames = QtWidgets.QPushButton("Colar em todos os frames")
+        self.btn_copy_all_frames.clicked.connect(self._copy_element_transform_all_frames)
+        copy_row.addWidget(self.btn_copy_all_frames)
+
         copy_row.addStretch(1)
         details_layout.addLayout(copy_row)
 
-        timeline_layout.addWidget(details_box)
+        timeline_split.addWidget(left_timeline_panel)
+        timeline_split.addWidget(details_box)
+        timeline_split.setStretchFactor(0, 2)
+        timeline_split.setStretchFactor(1, 1)
+
+        timeline_layout.addWidget(timeline_split)
 
         anim_layout.addWidget(timeline_box)
 
@@ -745,7 +762,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         return row
 
     def _clear_frame_elements(self) -> None:
-        self.frame_elements_list.clear()
+        self.frame_elements_tree.clear()
         self.frame_elements_label.setText("Selecione um frame para ver os elementos")
 
     def _update_frame_details(
@@ -762,16 +779,28 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
                 self._clear_frame_elements()
                 return
             elements = self.logic.frame_component_hierarchy(project, path, index)
-            self.frame_elements_list.clear()
+            self.frame_elements_tree.clear()
             modified_count = 0
+            depth_parents: dict[int, QtWidgets.QTreeWidgetItem] = {}
             for element in elements:
-                label = ("    " * element.get("depth", 0)) + element.get("name", "")
-                item = QtWidgets.QListWidgetItem(label)
-                item.setData(QtCore.Qt.ItemDataRole.UserRole, element.get("storeID"))
+                item = QtWidgets.QTreeWidgetItem([element.get("name", "")])
+                item.setData(0, QtCore.Qt.ItemDataRole.UserRole, element.get("storeID"))
                 if element.get("modified"):
-                    item.setForeground(QtGui.QBrush(QtGui.QColor("#006400")))
+                    item.setForeground(0, QtGui.QBrush(QtGui.QColor("#006400")))
                     modified_count += 1
-                self.frame_elements_list.addItem(item)
+                depth = int(element.get("depth", 0))
+                parent = depth_parents.get(depth - 1)
+                if parent:
+                    parent.addChild(item)
+                else:
+                    self.frame_elements_tree.addTopLevelItem(item)
+                depth_parents[depth] = item
+                for level in list(depth_parents):
+                    if level > depth:
+                        depth_parents.pop(level)
+                if parent:
+                    parent.setExpanded(True)
+                item.setExpanded(True)
             count = len(elements)
             self.frame_elements_label.setText(
                 f"{modified_count} elemento(s) modificados de {count} no frame {index}"
@@ -786,10 +815,10 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             src_frame = self._current_frame_index()
             if src_frame is None:
                 raise ValueError("Selecione um frame de origem na timeline")
-            selected_element = self.frame_elements_list.currentItem()
+            selected_element = self.frame_elements_tree.currentItem()
             if selected_element is None:
                 raise ValueError("Selecione um elemento na lista do frame")
-            store_id = selected_element.data(QtCore.Qt.ItemDataRole.UserRole)
+            store_id = selected_element.data(0, QtCore.Qt.ItemDataRole.UserRole)
             if not isinstance(store_id, int):
                 raise ValueError("Elemento sem storeID válido")
             max_frame = self.timeline_list.count() - 1
@@ -806,6 +835,24 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             self.logic.copy_element_transform(project, path, src_frame, target_frame, store_id)
             self._notify("Transformações copiadas para o frame de destino", "success")
             self.timeline_list.setCurrentRow(target_frame)
+        except Exception as exc:  # noqa: BLE001
+            self._notify(str(exc), "error")
+
+    def _copy_element_transform_all_frames(self) -> None:
+        try:
+            project, path, _ = self._require_animation()
+            src_frame = self._current_frame_index()
+            if src_frame is None:
+                raise ValueError("Selecione um frame de origem na timeline")
+            selected_element = self.frame_elements_tree.currentItem()
+            if selected_element is None:
+                raise ValueError("Selecione um elemento na lista do frame")
+            store_id = selected_element.data(0, QtCore.Qt.ItemDataRole.UserRole)
+            if not isinstance(store_id, int):
+                raise ValueError("Elemento sem storeID válido")
+            self.logic.copy_element_transform_all_frames(project, path, src_frame, store_id)
+            self._notify("Transformações coladas em todos os frames", "success")
+            self._update_frame_details()
         except Exception as exc:  # noqa: BLE001
             self._notify(str(exc), "error")
 

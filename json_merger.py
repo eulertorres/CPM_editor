@@ -449,7 +449,6 @@ class JSONMergerLogic:
         tgt_comps = tgt_frame.get("components") if isinstance(tgt_frame, dict) else None
         if not isinstance(tgt_comps, list):
             raise ValueError("Frame de destino sem componentes")
-        tgt_map = self._components_by_storeid(tgt_frame)
         descendant_ids = self._descendant_storeids(project, store_id)
         ids_to_copy = [store_id] + [sid for sid in descendant_ids if sid not in {store_id}]
         updated = 0
@@ -457,17 +456,42 @@ class JSONMergerLogic:
             source_comp = src_map.get(sid)
             if not source_comp:
                 continue
-            target_comp = tgt_map.get(sid)
-            if target_comp is None:
-                target_comp = {"storeID": sid}
-                tgt_comps.append(target_comp)
-                tgt_map[sid] = target_comp
-            if "pos" in source_comp:
-                target_comp["pos"] = copy.deepcopy(source_comp["pos"])
-            if "rotation" in source_comp:
-                target_comp["rotation"] = copy.deepcopy(source_comp["rotation"])
+            new_comp = self._component_with_defaults(project, sid, source_comp)
+            self._replace_component(tgt_comps, sid, new_comp)
             updated += 1
         if updated == 0:
+            raise ValueError("Nenhum dado de posição/rotação encontrado para copiar")
+        self._write_animation(project, path, anim)
+
+    def copy_element_transform_all_frames(
+        self, project: int, path: str, source_frame: int, store_id: int
+    ) -> None:
+        anim, frames = self._animation_with_frames(project, path)
+        if source_frame < 0 or source_frame >= len(frames):
+            raise ValueError("Frame de origem inválido")
+
+        src_frame = frames[source_frame]
+        src_map = self._components_by_storeid(src_frame)
+        descendant_ids = self._descendant_storeids(project, store_id)
+        ids_to_copy = [store_id] + [sid for sid in descendant_ids if sid not in {store_id}]
+
+        total_updated = 0
+        for idx, frame in enumerate(frames):
+            comps = frame.get("components") if isinstance(frame, dict) else None
+            if not isinstance(comps, list):
+                raise ValueError(f"Frame {idx} sem componentes")
+            frame_updated = False
+            for sid in ids_to_copy:
+                source_comp = src_map.get(sid)
+                if not source_comp:
+                    continue
+                new_comp = self._component_with_defaults(project, sid, source_comp)
+                self._replace_component(comps, sid, new_comp)
+                frame_updated = True
+            if frame_updated:
+                total_updated += 1
+
+        if total_updated == 0:
             raise ValueError("Nenhum dado de posição/rotação encontrado para copiar")
         self._write_animation(project, path, anim)
 
@@ -915,6 +939,17 @@ class JSONMergerLogic:
                     result[sid] = comp
         return result
 
+    @staticmethod
+    def _replace_component(comps: list[dict[str, Any]], store_id: int, new_comp: dict[str, Any]) -> None:
+        indices = [idx for idx, comp in enumerate(comps) if isinstance(comp, dict) and comp.get("storeID") == store_id]
+        if indices:
+            first_idx = indices[0]
+            comps[first_idx] = new_comp
+            for idx in reversed(indices[1:]):
+                comps.pop(idx)
+        else:
+            comps.append(new_comp)
+
     def _animation_with_frames(self, project: int, path: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         anim = self.load_animation(project, path)
         frames = anim.get("frames")
@@ -926,6 +961,30 @@ class JSONMergerLogic:
         archive = self.project1_archive if project == 1 else self.project2_archive
         archive[path] = json.dumps(anim, indent=2, ensure_ascii=False).encode("utf-8")
 
+    def _component_with_defaults(
+        self, project: int, store_id: int, source_component: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        model = self.json1 if project == 1 else self.json2
+        base_from_model: dict[str, Any] | None = None
+        if model:
+            mapping = self._storeid_node_map(model)
+            model_nodes = mapping.get(store_id)
+            if model_nodes:
+                base_from_model = model_nodes[0]
+
+        ordered_keys = ("color", "pos", "rotation", "show", "scale")
+        result: dict[str, Any] = {}
+        for key in ordered_keys:
+            if isinstance(base_from_model, dict) and key in base_from_model:
+                result[key] = copy.deepcopy(base_from_model[key])
+        if isinstance(source_component, dict):
+            for key, value in source_component.items():
+                if key == "storeID":
+                    continue
+                result[key] = copy.deepcopy(value)
+        result["storeID"] = store_id
+        return result
+
     def _base_components_from_model(self, project: int) -> list[dict[str, Any]]:
         model = self.json1 if project == 1 else self.json2
         if not model:
@@ -934,11 +993,7 @@ class JSONMergerLogic:
         components: list[dict[str, Any]] = []
         for store_id in sorted(mapping):
             first = mapping[store_id][0]
-            comp: dict[str, Any] = {"storeID": store_id}
-            if "pos" in first:
-                comp["pos"] = copy.deepcopy(first["pos"])
-            if "rotation" in first:
-                comp["rotation"] = copy.deepcopy(first["rotation"])
+            comp = self._component_with_defaults(project, store_id, first)
             components.append(comp)
         return components
 
