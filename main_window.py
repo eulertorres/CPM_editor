@@ -67,6 +67,46 @@ class OptionsDialog(QtWidgets.QDialog):
         }
 
 
+class CopyTransformDialog(QtWidgets.QDialog):
+    def __init__(self, parent: QtWidgets.QWidget, frame_count: int, current_frame: int) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Copiar pos/rot + filhos")
+        self.frame_count = max(frame_count, 1)
+        self.current_frame = current_frame
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        layout = QtWidgets.QVBoxLayout(self)
+
+        form = QtWidgets.QFormLayout()
+        self.spn_target = QtWidgets.QSpinBox()
+        self.spn_target.setRange(1, self.frame_count)
+        self.spn_target.setValue(self.current_frame + 1)
+        form.addRow("Frame de destino (1-index)", self.spn_target)
+
+        self.chk_all_frames = QtWidgets.QCheckBox("Colar em todos os frames")
+        self.chk_all_frames.stateChanged.connect(self._toggle_spin_enabled)
+        form.addRow("Aplicação", self.chk_all_frames)
+
+        layout.addLayout(form)
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _toggle_spin_enabled(self) -> None:
+        self.spn_target.setEnabled(not self.chk_all_frames.isChecked())
+
+    def values(self) -> dict[str, int | bool]:
+        return {
+            "all_frames": self.chk_all_frames.isChecked(),
+            "target_frame": max(0, self.spn_target.value() - 1),
+        }
+
+
 class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
     def __init__(self) -> None:
         super().__init__()
@@ -98,6 +138,11 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         self.btn_project2 = QtWidgets.QPushButton("Carregar Projeto 2")
         self.btn_project2.clicked.connect(self.load_project2)
         top_button_row.addWidget(self.btn_project2)
+
+        self.btn_refresh_projects = self._create_tool_button(
+            "⟳", "Recarregar Projetos 1 e 2", self.refresh_projects
+        )
+        top_button_row.addWidget(self.btn_refresh_projects)
 
         self.btn_save = QtWidgets.QPushButton("Salvar Projeto 2")
         self.btn_save.clicked.connect(self.save_project2)
@@ -182,21 +227,21 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         anim_layout = QtWidgets.QVBoxLayout(animations_tab)
 
         anim_buttons = QtWidgets.QHBoxLayout()
-        self.btn_copy_anim = QtWidgets.QPushButton("Copiar animação do Projeto 1")
-        self.btn_copy_anim.clicked.connect(self.copy_animation)
-        anim_buttons.addWidget(self.btn_copy_anim)
-
-        self.btn_paste_anim = QtWidgets.QPushButton("Colar animação no Projeto 2")
-        self.btn_paste_anim.clicked.connect(self.paste_animation)
-        anim_buttons.addWidget(self.btn_paste_anim)
-
-        self.btn_apply_frame = QtWidgets.QPushButton("Aplicar frame ao modelo")
-        self.btn_apply_frame.clicked.connect(self.apply_frame_to_model)
-        anim_buttons.addWidget(self.btn_apply_frame)
-
-        self.btn_interp_frames = QtWidgets.QPushButton("Interpolar frames")
-        self.btn_interp_frames.clicked.connect(self.interpolate_animation_frames)
-        anim_buttons.addWidget(self.btn_interp_frames)
+        anim_buttons.setSpacing(4)
+        anim_buttons.setContentsMargins(4, 2, 4, 2)
+        anim_buttons.addWidget(
+            self._create_tool_button("📥", "Copiar animação do Projeto 1", self.copy_animation)
+        )
+        anim_buttons.addWidget(
+            self._create_tool_button("📤", "Colar animação no Projeto 2", self.paste_animation)
+        )
+        anim_buttons.addWidget(
+            self._create_tool_button("🧩", "Aplicar frame ao modelo", self.apply_frame_to_model)
+        )
+        anim_buttons.addWidget(
+            self._create_tool_button("📈", "Interpolar frames", self.interpolate_animation_frames)
+        )
+        anim_buttons.addStretch(1)
 
         anim_layout.addLayout(anim_buttons)
 
@@ -238,25 +283,27 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
         left_timeline_layout = QtWidgets.QVBoxLayout(left_timeline_panel)
 
         controls = QtWidgets.QHBoxLayout()
-        self.btn_move_left = QtWidgets.QPushButton("Mover ←")
-        self.btn_move_left.clicked.connect(lambda: self._move_frame(-1))
+        controls.setSpacing(4)
+        controls.setContentsMargins(4, 2, 4, 2)
+        self.btn_move_left = self._create_tool_button("⬅", "Mover frame para a esquerda", lambda: self._move_frame(-1))
         controls.addWidget(self.btn_move_left)
 
-        self.btn_move_right = QtWidgets.QPushButton("Mover →")
-        self.btn_move_right.clicked.connect(lambda: self._move_frame(1))
+        self.btn_move_right = self._create_tool_button("➡", "Mover frame para a direita", lambda: self._move_frame(1))
         controls.addWidget(self.btn_move_right)
 
-        self.btn_add_clean = QtWidgets.QPushButton("Adicionar frame limpo")
-        self.btn_add_clean.clicked.connect(self._add_clean_frame)
+        self.btn_add_clean = self._create_tool_button("➕", "Adicionar frame limpo", self._add_clean_frame)
         controls.addWidget(self.btn_add_clean)
 
-        self.btn_duplicate = QtWidgets.QPushButton("Duplicar frame")
-        self.btn_duplicate.clicked.connect(self._duplicate_frame)
+        self.btn_duplicate = self._create_tool_button("⧉", "Duplicar frame", self._duplicate_frame)
         controls.addWidget(self.btn_duplicate)
 
-        self.btn_delete = QtWidgets.QPushButton("Excluir frame")
-        self.btn_delete.clicked.connect(self._delete_frame)
+        self.btn_delete = self._create_tool_button("🗑", "Excluir frame", self._delete_frame)
         controls.addWidget(self.btn_delete)
+
+        self.btn_copy_transform = self._create_tool_button(
+            "📌", "Copiar pos/rot + filhos para outro frame", self._copy_element_transform
+        )
+        controls.addWidget(self.btn_copy_transform)
 
         controls.addStretch(1)
         left_timeline_layout.addLayout(controls)
@@ -279,20 +326,6 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
         )
         details_layout.addWidget(self.frame_elements_tree)
-
-        copy_row = QtWidgets.QHBoxLayout()
-        self.btn_copy_transform = QtWidgets.QPushButton(
-            "Copiar pos/rot + filhos para outro frame"
-        )
-        self.btn_copy_transform.clicked.connect(self._copy_element_transform)
-        copy_row.addWidget(self.btn_copy_transform)
-
-        self.btn_copy_all_frames = QtWidgets.QPushButton("Colar em todos os frames")
-        self.btn_copy_all_frames.clicked.connect(self._copy_element_transform_all_frames)
-        copy_row.addWidget(self.btn_copy_all_frames)
-
-        copy_row.addStretch(1)
-        details_layout.addLayout(copy_row)
 
         timeline_split.addWidget(left_timeline_panel)
         timeline_split.addWidget(details_box)
@@ -338,6 +371,34 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             self._notify("Projeto 2 carregado", "info")
         except Exception as exc:  # noqa: BLE001
             self._notify(f"Falha ao carregar Projeto 2: {exc}", "error")
+
+    def refresh_projects(self) -> None:
+        refreshed_any = False
+        try:
+            if self.logic.project1_path:
+                self.logic.load_project1(self.logic.project1_path)
+                self._build_tree(self.tree1, self.logic.json1)
+                refreshed_any = True
+        except Exception as exc:  # noqa: BLE001
+            self._notify(f"Falha ao recarregar Projeto 1: {exc}", "error")
+            return
+
+        try:
+            if self.logic.project2_path:
+                self.logic.load_project2(self.logic.project2_path)
+                self._build_tree(self.tree2, self.logic.json2)
+                refreshed_any = True
+        except Exception as exc:  # noqa: BLE001
+            self._notify(f"Falha ao recarregar Projeto 2: {exc}", "error")
+            return
+
+        if refreshed_any:
+            self._refresh_animation_lists()
+            self.clear_search()
+            self.logic.clear_clipboard()
+            self._notify("Projetos recarregados", "success")
+        else:
+            self._notify("Carregue os projetos pelo menos uma vez antes de dar refresh", "warning")
 
     def save_project2(self) -> None:
         try:
@@ -740,7 +801,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             for idx, frame in enumerate(frames):
                 components = frame.get("components", []) if isinstance(frame, dict) else []
                 comp_count = len(components) if isinstance(components, list) else 0
-                item = QtWidgets.QListWidgetItem(f"Frame {idx}\n{comp_count} comps")
+                item = QtWidgets.QListWidgetItem(f"Frame {idx + 1}\n{comp_count} comps")
                 item.setData(QtCore.Qt.ItemDataRole.UserRole, idx)
                 self.timeline_list.addItem(item)
             self.timeline_header.setText(
@@ -798,12 +859,10 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
                 for level in list(depth_parents):
                     if level > depth:
                         depth_parents.pop(level)
-                if parent:
-                    parent.setExpanded(True)
-                item.setExpanded(True)
+            self.frame_elements_tree.collapseAll()
             count = len(elements)
             self.frame_elements_label.setText(
-                f"{modified_count} elemento(s) modificados de {count} no frame {index}"
+                f"{modified_count} elemento(s) modificados de {count} no frame {index + 1}"
             )
         except Exception as exc:  # noqa: BLE001
             self._notify(str(exc), "error")
@@ -821,38 +880,19 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
             store_id = selected_element.data(0, QtCore.Qt.ItemDataRole.UserRole)
             if not isinstance(store_id, int):
                 raise ValueError("Elemento sem storeID válido")
-            max_frame = self.timeline_list.count() - 1
-            target_frame, ok = QtWidgets.QInputDialog.getInt(
-                self,
-                "Copiar para frame",
-                "Número do frame de destino (0-index)",
-                value=src_frame,
-                min=0,
-                max=max_frame if max_frame >= 0 else 0,
-            )
-            if not ok:
+            dialog = CopyTransformDialog(self, self.timeline_list.count(), src_frame)
+            if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
                 return
-            self.logic.copy_element_transform(project, path, src_frame, target_frame, store_id)
-            self._notify("Transformações copiadas para o frame de destino", "success")
-            self.timeline_list.setCurrentRow(target_frame)
-        except Exception as exc:  # noqa: BLE001
-            self._notify(str(exc), "error")
-
-    def _copy_element_transform_all_frames(self) -> None:
-        try:
-            project, path, _ = self._require_animation()
-            src_frame = self._current_frame_index()
-            if src_frame is None:
-                raise ValueError("Selecione um frame de origem na timeline")
-            selected_element = self.frame_elements_tree.currentItem()
-            if selected_element is None:
-                raise ValueError("Selecione um elemento na lista do frame")
-            store_id = selected_element.data(0, QtCore.Qt.ItemDataRole.UserRole)
-            if not isinstance(store_id, int):
-                raise ValueError("Elemento sem storeID válido")
-            self.logic.copy_element_transform_all_frames(project, path, src_frame, store_id)
-            self._notify("Transformações coladas em todos os frames", "success")
-            self._update_frame_details()
+            values = dialog.values()
+            if values.get("all_frames"):
+                self.logic.copy_element_transform_all_frames(project, path, src_frame, store_id)
+                self._notify("Transformações coladas em todos os frames", "success")
+                self._update_frame_details()
+            else:
+                target_frame = int(values.get("target_frame", src_frame))
+                self.logic.copy_element_transform(project, path, src_frame, target_frame, store_id)
+                self._notify("Transformações copiadas para o frame de destino", "success")
+                self.timeline_list.setCurrentRow(target_frame)
         except Exception as exc:  # noqa: BLE001
             self._notify(str(exc), "error")
 

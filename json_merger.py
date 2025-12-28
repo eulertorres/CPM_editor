@@ -9,6 +9,7 @@ class JSONMergerLogic:
     def __init__(self) -> None:
         self.json1: Any = {}
         self.json2: Any = {}
+        self.project1_path: str | None = None
         self.project2_path: str | None = None
         self.project2_archive: dict[str, bytes] = {}
         self.project1_archive: dict[str, bytes] = {}
@@ -27,6 +28,7 @@ class JSONMergerLogic:
                 raise ValueError("Nenhum config.json no projeto")
             raw_json = self._decode_bytes(self.project1_archive[config_names[0]])
             self.json1 = json.loads(raw_json)
+            self.project1_path = path
 
     def load_project2(self, path: str) -> None:
         with zipfile.ZipFile(path, "r") as archive:
@@ -973,8 +975,17 @@ class JSONMergerLogic:
                 base_from_model = model_nodes[0]
 
         ordered_keys = ("color", "pos", "rotation", "show", "scale")
+        defaults: dict[str, Any] = {
+            "color": "0",
+            "pos": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "rotation": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "show": True,
+            "scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+        }
         result: dict[str, Any] = {}
         for key in ordered_keys:
+            if key in defaults:
+                result[key] = copy.deepcopy(defaults[key])
             if isinstance(base_from_model, dict) and key in base_from_model:
                 result[key] = copy.deepcopy(base_from_model[key])
         if isinstance(source_component, dict):
