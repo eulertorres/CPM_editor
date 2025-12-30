@@ -162,7 +162,7 @@ class JSONMergerWindow(QtWidgets.QMainWindow, StatusMixin):
 
         self.btn_github = QtWidgets.QPushButton()
         self.btn_github.setFixedSize(24, 24)
-        self.btn_github.setIcon(QtGui.QIcon("assets/git.png"))
+        self.btn_github.setIcon(QtGui.QIcon("Assets/git.png"))
         self.btn_github.setIconSize(QtCore.QSize(18, 18))
         self.btn_github.setToolTip("Abrir repositório")
         self.btn_github.clicked.connect(self.open_repo)
